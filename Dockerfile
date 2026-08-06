@@ -7,22 +7,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
-RUN npm run build \
-  && npm prune --omit=dev
+RUN npm run build
 
 FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV DATA_DIR=/data
 ENV HOST=0.0.0.0
-# Runtime needs libc for native better-sqlite3; no compiler required if built above on same image family
-COPY --from=build /app/package.json /app/package-lock.json ./
-COPY --from=build /app/node_modules ./node_modules
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm rebuild better-sqlite3
 COPY --from=build /app/build ./build
 COPY --from=build /app/app ./app
 COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/public ./public
 RUN mkdir -p /data
 EXPOSE 3000
-# Bypass npm wrapper so signals / exit codes are clean in Railway
 CMD ["node", "--import", "tsx", "scripts/railway-start.ts"]

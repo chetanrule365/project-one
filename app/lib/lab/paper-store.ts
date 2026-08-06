@@ -41,8 +41,16 @@ let dbSingleton: Database.Database | null = null;
 
 export function getPaperDb() {
   if (!dbSingleton) {
-    dbSingleton = new Database(dbPath());
-    dbSingleton.pragma("journal_mode = WAL");
+    const file = dbPath();
+    try {
+      const db = new Database(file);
+      // DELETE is safer than WAL on some mounted volumes (e.g. Railway).
+      db.pragma("journal_mode = DELETE");
+      dbSingleton = db;
+    } catch (error) {
+      console.error(`[paper-store] failed to open ${file}`, error);
+      throw error;
+    }
     dbSingleton.exec(`
       CREATE TABLE IF NOT EXISTS paper_runs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
