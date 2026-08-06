@@ -14,7 +14,6 @@
     "@react-router/express": "^7.15.0",
     "@react-router/node": "7.15.0",
     "@react-router/serve": "7.15.0",
-    "better-sqlite3": "^13.0.3",
     "compression": "^1.8.1",
     "express": "^4.22.2",
     "isbot": "^5.1.36",
@@ -27,7 +26,6 @@
   "devDependencies": {
     "@react-router/dev": "7.15.0",
     "@tailwindcss/vite": "^4.2.2",
-    "@types/better-sqlite3": "^9.6.0",
     "@types/compression": "^1.8.1",
     "@types/express": "^4.17.25",
     "@types/node": "^22",

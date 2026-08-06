@@ -1,6 +1,12 @@
-import Database from "better-sqlite3";
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { getDataDir, getPaperDbPath } from "../data-dir";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
+import path from "node:path";
+import { getDataDir } from "../data-dir";
 
 export type PaperRun = {
   id: number;
@@ -32,85 +38,65 @@ export type PaperTrade = {
   exit_at: string | null;
 };
 
-function dbPath() {
+type PaperState = {
+  nextRunId: number;
+  nextTradeId: number;
+  runs: PaperRun[];
+  trades: PaperTrade[];
+};
+
+const EMPTY: PaperState = {
+  nextRunId: 1,
+  nextTradeId: 1,
+  runs: [],
+  trades: [],
+};
+
+function storePath() {
   mkdirSync(getDataDir(), { recursive: true });
-  return getPaperDbPath();
+  return path.join(getDataDir(), "paper.json");
 }
 
-let dbSingleton: Database.Database | null = null;
+let cache: PaperState | null = null;
 
-export function getPaperDb() {
-  if (!dbSingleton) {
-    const file = dbPath();
-    // Stale WAL/SHM from crash loops can break reopen on mounted volumes.
-    for (const suffix of ["-wal", "-shm"]) {
-      const side = `${file}${suffix}`;
-      if (existsSync(side)) {
-        try {
-          unlinkSync(side);
-          console.log(`[paper-store] removed stale ${side}`);
-        } catch (error) {
-          console.error(`[paper-store] could not remove ${side}`, error);
-        }
-      }
-    }
-    try {
-      const db = new Database(file, { timeout: 5_000 });
-      // DELETE is safer than WAL on some mounted volumes (e.g. Railway).
-      db.pragma("journal_mode = DELETE");
-      dbSingleton = db;
-    } catch (error) {
-      console.error(`[paper-store] failed to open ${file}`, error);
-      throw error;
-    }
-    dbSingleton.exec(`
-      CREATE TABLE IF NOT EXISTS paper_runs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        instrument_id TEXT NOT NULL,
-        strategy_id TEXT NOT NULL,
-        width_steps INTEGER NOT NULL,
-        status TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS paper_trades (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        run_id INTEGER NOT NULL,
-        strategy_id TEXT NOT NULL,
-        status TEXT NOT NULL,
-        short_strike REAL NOT NULL,
-        long_strike REAL NOT NULL,
-        short_side TEXT NOT NULL,
-        long_side TEXT NOT NULL,
-        credit REAL NOT NULL,
-        width REAL NOT NULL,
-        spot_entry REAL NOT NULL,
-        spot_exit REAL,
-        pnl_points REAL,
-        pnl_inr REAL,
-        entry_at TEXT NOT NULL,
-        expiry_at TEXT NOT NULL,
-        exit_at TEXT,
-        FOREIGN KEY(run_id) REFERENCES paper_runs(id)
-      );
-    `);
+function load(): PaperState {
+  if (cache) return cache;
+  const file = storePath();
+  if (!existsSync(file)) {
+    cache = structuredClone(EMPTY);
+    return cache;
   }
-  return dbSingleton;
+  try {
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as PaperState;
+    cache = {
+      nextRunId: Number(parsed.nextRunId) || 1,
+      nextTradeId: Number(parsed.nextTradeId) || 1,
+      runs: Array.isArray(parsed.runs) ? parsed.runs : [],
+      trades: Array.isArray(parsed.trades) ? parsed.trades : [],
+    };
+  } catch (error) {
+    console.error(`[paper-store] failed to read ${file}, starting empty`, error);
+    cache = structuredClone(EMPTY);
+  }
+  return cache;
+}
+
+function save(state: PaperState) {
+  const file = storePath();
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, JSON.stringify(state, null, 2));
+  renameSync(tmp, file);
+  cache = state;
 }
 
 export function listPaperRuns() {
-  return getPaperDb()
-    .prepare(
-      `SELECT * FROM paper_runs ORDER BY id DESC LIMIT 20`,
-    )
-    .all() as PaperRun[];
+  return [...load().runs].sort((a, b) => b.id - a.id).slice(0, 20);
 }
 
 export function getActiveRun() {
-  return getPaperDb()
-    .prepare(`SELECT * FROM paper_runs WHERE status = 'active' ORDER BY id DESC LIMIT 1`)
-    .get() as PaperRun | undefined;
+  return load()
+    .runs.filter((run) => run.status === "active")
+    .sort((a, b) => b.id - a.id)[0];
 }
 
 export function startPaperRun(input: {
@@ -118,96 +104,81 @@ export function startPaperRun(input: {
   strategyId: string;
   widthSteps: number;
 }) {
-  const db = getPaperDb();
+  const state = load();
   const now = new Date().toISOString();
-  db.prepare(
-    `UPDATE paper_runs SET status = 'stopped', updated_at = ? WHERE status = 'active'`,
-  ).run(now);
-
-  const result = db
-    .prepare(
-      `INSERT INTO paper_runs (instrument_id, strategy_id, width_steps, status, created_at, updated_at)
-       VALUES (?, ?, ?, 'active', ?, ?)`,
-    )
-    .run(
-      input.instrumentId,
-      input.strategyId,
-      input.widthSteps,
-      now,
-      now,
-    );
-
-  return getPaperDb()
-    .prepare(`SELECT * FROM paper_runs WHERE id = ?`)
-    .get(result.lastInsertRowid) as PaperRun;
+  for (const run of state.runs) {
+    if (run.status === "active") {
+      run.status = "stopped";
+      run.updated_at = now;
+    }
+  }
+  const run: PaperRun = {
+    id: state.nextRunId++,
+    instrument_id: input.instrumentId,
+    strategy_id: input.strategyId,
+    width_steps: input.widthSteps,
+    status: "active",
+    created_at: now,
+    updated_at: now,
+  };
+  state.runs.push(run);
+  save(state);
+  return run;
 }
 
 export function stopPaperRun(runId: number) {
-  getPaperDb()
-    .prepare(
-      `UPDATE paper_runs SET status = 'stopped', updated_at = ? WHERE id = ?`,
-    )
-    .run(new Date().toISOString(), runId);
+  const state = load();
+  const run = state.runs.find((item) => item.id === runId);
+  if (!run) return;
+  run.status = "stopped";
+  run.updated_at = new Date().toISOString();
+  save(state);
 }
 
 export function listTradesForRun(runId: number) {
-  return getPaperDb()
-    .prepare(
-      `SELECT * FROM paper_trades WHERE run_id = ? ORDER BY id DESC`,
-    )
-    .all(runId) as PaperTrade[];
+  return load()
+    .trades.filter((trade) => trade.run_id === runId)
+    .sort((a, b) => b.id - a.id);
 }
 
 export function getOpenTrade(runId: number) {
-  return getPaperDb()
-    .prepare(
-      `SELECT * FROM paper_trades WHERE run_id = ? AND status = 'open' ORDER BY id DESC LIMIT 1`,
-    )
-    .get(runId) as PaperTrade | undefined;
+  return load()
+    .trades.filter((trade) => trade.run_id === runId && trade.status === "open")
+    .sort((a, b) => b.id - a.id)[0];
 }
 
-export function insertOpenTrade(trade: Omit<PaperTrade, "id" | "spot_exit" | "pnl_points" | "pnl_inr" | "exit_at" | "status">) {
-  const result = getPaperDb()
-    .prepare(
-      `INSERT INTO paper_trades (
-        run_id, strategy_id, status, short_strike, long_strike, short_side, long_side,
-        credit, width, spot_entry, spot_exit, pnl_points, pnl_inr, entry_at, expiry_at, exit_at
-      ) VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, NULL)`,
-    )
-    .run(
-      trade.run_id,
-      trade.strategy_id,
-      trade.short_strike,
-      trade.long_strike,
-      trade.short_side,
-      trade.long_side,
-      trade.credit,
-      trade.width,
-      trade.spot_entry,
-      trade.entry_at,
-      trade.expiry_at,
-    );
-
-  return getPaperDb()
-    .prepare(`SELECT * FROM paper_trades WHERE id = ?`)
-    .get(result.lastInsertRowid) as PaperTrade;
+export function insertOpenTrade(
+  trade: Omit<
+    PaperTrade,
+    "id" | "spot_exit" | "pnl_points" | "pnl_inr" | "exit_at" | "status"
+  >,
+) {
+  const state = load();
+  const row: PaperTrade = {
+    id: state.nextTradeId++,
+    ...trade,
+    status: "open",
+    spot_exit: null,
+    pnl_points: null,
+    pnl_inr: null,
+    exit_at: null,
+  };
+  state.trades.push(row);
+  save(state);
+  return row;
 }
 
 export function closeTrade(
   tradeId: number,
   input: { spotExit: number; pnlPoints: number; pnlInr: number },
 ) {
-  getPaperDb()
-    .prepare(
-      `UPDATE paper_trades
-       SET status = 'closed', spot_exit = ?, pnl_points = ?, pnl_inr = ?, exit_at = ?
-       WHERE id = ?`,
-    )
-    .run(
-      input.spotExit,
-      input.pnlPoints,
-      input.pnlInr,
-      new Date().toISOString(),
-      tradeId,
-    );
+  const state = load();
+  const trade = state.trades.find((item) => item.id === tradeId);
+  if (!trade) return;
+  trade.status = "closed";
+  trade.spot_exit = input.spotExit;
+  trade.pnl_points = input.pnlPoints;
+  trade.pnl_inr = input.pnlInr;
+  trade.exit_at = new Date().toISOString();
+  save(state);
 }

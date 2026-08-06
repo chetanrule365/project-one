@@ -7,7 +7,4 @@ export default defineConfig({
   resolve: {
     tsconfigPaths: true,
   },
-  ssr: {
-    external: ["better-sqlite3"],
-  },
 });

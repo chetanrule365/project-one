@@ -15,7 +15,7 @@ A small always-on Node service + tiny volume usually stays near Hobby. The Free 
 
 - Public URL for Market Watch + Strategy Lab
 - Paper worker starts with the process (no need to keep the browser open)
-- SQLite (`paper.db`) + option cache on a **persistent volume** at `/data`
+- Paper state (`paper.json`) + option cache on a **persistent volume** at `/data`
 
 ## One-time setup
 
