@@ -1,4 +1,4 @@
-import { getActiveRun, getOpenTrade } from "./paper-store";
+import { getOpenTrade, listActiveRuns, type PaperRun } from "./paper-store";
 import { syncPaper } from "./paper";
 import { FLAT_BY_HOUR } from "../strategies/types";
 import { expiryWeekday, istWeekday } from "../strategies/expiry-day";
@@ -49,30 +49,30 @@ function hourIst() {
   );
 }
 
-function shouldSyncNow(active: NonNullable<ReturnType<typeof getActiveRun>>) {
+function shouldSyncNow(active: PaperRun) {
   const open = getOpenTrade(active.id);
-  if (open) return true; // manage stops / flat-by while open
+  if (open) return true;
 
   const hour = hourIst();
-  const expiryToday = istWeekday(todayIst()) === expiryWeekday(active.instrument_id);
-  // Entry window with a little buffer before 10:00
+  const expiryToday =
+    istWeekday(todayIst()) === expiryWeekday(active.instrument_id);
   if (expiryToday && hour >= 9 && hour < FLAT_BY_HOUR) return true;
   return false;
 }
 
-function nextDelayMs(active: ReturnType<typeof getActiveRun> | null) {
-  if (!active) return IDLE_SYNC_MS;
-  return shouldSyncNow(active) ? ACTIVE_SYNC_MS : IDLE_SYNC_MS;
-}
-
-function safeActiveRun() {
+function safeActiveRuns(): PaperRun[] {
   try {
-    return getActiveRun();
+    return listActiveRuns();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`[paper-worker] db read failed: ${message}`);
-    return null;
+    console.error(`[paper-worker] store read failed: ${message}`);
+    return [];
   }
+}
+
+function nextDelayMs(runs: PaperRun[]) {
+  if (runs.length === 0) return IDLE_SYNC_MS;
+  return runs.some(shouldSyncNow) ? ACTIVE_SYNC_MS : IDLE_SYNC_MS;
 }
 
 async function tick() {
@@ -80,20 +80,32 @@ async function tick() {
   if (s.running) return;
   s.running = true;
   try {
-    const active = safeActiveRun();
-    if (!active) {
-      s.lastMessage = "No active paper run";
+    const runs = safeActiveRuns();
+    if (runs.length === 0) {
+      s.lastMessage = "No active paper runs";
       return;
     }
-    if (!shouldSyncNow(active)) {
-      s.lastMessage = "Idle — waiting for expiry window or open trade";
+    const due = runs.filter(shouldSyncNow);
+    if (due.length === 0) {
+      s.lastMessage = `Idle — ${runs.length} run(s) waiting for expiry window or open trade`;
       return;
     }
-    const result = await syncPaper(active);
+
+    const messages: string[] = [];
+    for (const run of due) {
+      try {
+        const result = await syncPaper(run);
+        messages.push(`${run.instrument_id}: ${result.message}`);
+        console.log(`[paper-worker] ${run.instrument_id}: ${result.message}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        messages.push(`${run.instrument_id}: ${message}`);
+        console.error(`[paper-worker] ${run.instrument_id}: ${message}`);
+      }
+    }
     s.lastSyncAt = new Date().toISOString();
-    s.lastMessage = result.message;
+    s.lastMessage = messages.join(" · ");
     s.lastError = null;
-    console.log(`[paper-worker] ${result.message}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     s.lastError = message;
@@ -107,7 +119,7 @@ async function tick() {
 function schedule() {
   const s = state();
   if (s.timer) clearTimeout(s.timer);
-  const delay = nextDelayMs(safeActiveRun());
+  const delay = nextDelayMs(safeActiveRuns());
   s.timer = setTimeout(() => {
     void tick()
       .catch((error) => {
@@ -123,9 +135,8 @@ export function ensurePaperWorker() {
   if (s.started) return;
   s.started = true;
   console.log(
-    "[paper-worker] started — syncs while an active run exists (Node process must stay up)",
+    "[paper-worker] started — syncs all active index runs while Node stays up",
   );
-  // Defer first tick so HTTP serve can bind PORT before any SQLite/API work.
   setTimeout(() => {
     void tick()
       .catch((error) => {
@@ -137,19 +148,18 @@ export function ensurePaperWorker() {
 
 export function getPaperWorkerStatus() {
   const s = state();
-  const active = safeActiveRun();
+  const runs = safeActiveRuns();
   return {
     started: s.started,
-    hasActiveRun: Boolean(active),
+    hasActiveRun: runs.length > 0,
+    activeCount: runs.length,
     lastSyncAt: s.lastSyncAt,
     lastMessage: s.lastMessage,
     lastError: s.lastError,
-    nextMode: active && shouldSyncNow(active) ? "active" : "idle",
+    nextMode: runs.some(shouldSyncNow) ? "active" : "idle",
   };
 }
 
-// Start with the SSR server process (idempotent). Do not import this module from a
-// second bundle or you will get a second SQLite connection.
 if (process.env.NODE_ENV === "production") {
   ensurePaperWorker();
 }

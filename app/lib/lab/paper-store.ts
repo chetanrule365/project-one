@@ -93,10 +93,19 @@ export function listPaperRuns() {
   return [...load().runs].sort((a, b) => b.id - a.id).slice(0, 20);
 }
 
-export function getActiveRun() {
+export function listActiveRuns() {
   return load()
     .runs.filter((run) => run.status === "active")
-    .sort((a, b) => b.id - a.id)[0];
+    .sort((a, b) => a.instrument_id.localeCompare(b.instrument_id));
+}
+
+/** @deprecated Prefer listActiveRuns — kept for single-run call sites. */
+export function getActiveRun(instrumentId?: string) {
+  const active = listActiveRuns();
+  if (instrumentId) {
+    return active.find((run) => run.instrument_id === instrumentId);
+  }
+  return active[0];
 }
 
 export function startPaperRun(input: {
@@ -106,8 +115,9 @@ export function startPaperRun(input: {
 }) {
   const state = load();
   const now = new Date().toISOString();
+  // One active run per index — restarting Nifty does not stop Bank Nifty.
   for (const run of state.runs) {
-    if (run.status === "active") {
+    if (run.status === "active" && run.instrument_id === input.instrumentId) {
       run.status = "stopped";
       run.updated_at = now;
     }

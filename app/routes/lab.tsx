@@ -90,7 +90,7 @@ export async function action({ request }: Route.ActionArgs) {
         ok: true as const,
         error: null,
         backtest: null,
-        paperMessage: "Paper run started.",
+        paperMessage: `Paper run started for ${instrumentId}.`,
       };
     }
 
@@ -379,16 +379,18 @@ export default function LabPage({
             Paper trading
           </h2>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Background worker syncs while the <strong>Node server</strong> is
-            running (you can close the browser). Entries on expiry day
-            10:00–14:00 IST; stops / flat-by-2pm on open trades. No real orders.
-            Keep <code className="text-xs">npm run dev</code> or{" "}
-            <code className="text-xs">npm run paper:worker</code> alive.
+            Run Nifty, Bank Nifty, and Sensex together — one active paper run
+            per index. Background worker syncs while the{" "}
+            <strong>Node server</strong> is up (browser can close). Entries on
+            each index&apos;s expiry day 10:00–14:00 IST. No real orders.
           </p>
 
           {loaderData.worker?.started ? (
             <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
               Worker: {loaderData.worker.nextMode}
+              {loaderData.worker.activeCount
+                ? ` · ${loaderData.worker.activeCount} active`
+                : ""}
               {loaderData.worker.lastSyncAt
                 ? ` · last sync ${new Date(loaderData.worker.lastSyncAt).toLocaleTimeString("en-IN")}`
                 : ""}
@@ -401,81 +403,91 @@ export default function LabPage({
             </p>
           ) : null}
 
-          <div className="mt-4 flex flex-wrap gap-3">
-            {paper.active ? (
-              <Form method="post">
-                <input type="hidden" name="intent" value="paper-stop" />
-                <input type="hidden" name="runId" value={paper.active.id} />
-                <button
-                  type="submit"
-                  className="rounded-lg border border-rose-300 px-4 py-2 text-sm font-medium text-rose-700 dark:border-rose-800 dark:text-rose-300"
-                >
-                  Stop run
-                </button>
-              </Form>
-            ) : (
-              <Form method="post" className="flex flex-wrap items-end gap-3">
-                <input type="hidden" name="intent" value="paper-start" />
-                <label className="text-sm">
-                  <span className="text-slate-500">Index</span>
-                  <select
-                    name="instrumentId"
-                    defaultValue="NIFTY"
-                    className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
-                  >
-                    {loaderData.instruments.map((instrument) => (
-                      <option key={instrument.id} value={instrument.id}>
-                        {instrument.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="text-sm">
-                  <span className="text-slate-500">Strategy</span>
-                  <select
-                    name="strategyId"
-                    defaultValue="AUTO"
-                    className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
-                  >
-                    <option value="AUTO">Auto playbook</option>
-                    {loaderData.strategies.map((strategy) => (
-                      <option key={strategy.id} value={strategy.id}>
-                        {strategy.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="text-sm">
-                  <span className="text-slate-500">Wing width</span>
-                  <select
-                    name="widthSteps"
-                    defaultValue={String(DEFAULT_WIDTH_STEPS)}
-                    className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
-                  >
-                    {[1, 2, 3].map((step) => (
-                      <option key={step} value={step}>
-                        {step}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  type="submit"
-                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white dark:bg-slate-100 dark:text-slate-900"
-                >
-                  Start paper run
-                </button>
-              </Form>
-            )}
-          </div>
+          <Form method="post" className="mt-4 flex flex-wrap items-end gap-3">
+            <input type="hidden" name="intent" value="paper-start" />
+            <label className="text-sm">
+              <span className="text-slate-500">Index</span>
+              <select
+                name="instrumentId"
+                defaultValue="NIFTY"
+                className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+              >
+                {loaderData.instruments.map((instrument) => {
+                  const running = paper.activeRuns.some(
+                    (run) => run.instrument_id === instrument.id,
+                  );
+                  return (
+                    <option key={instrument.id} value={instrument.id}>
+                      {instrument.name}
+                      {running ? " (restart)" : ""}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            <label className="text-sm">
+              <span className="text-slate-500">Strategy</span>
+              <select
+                name="strategyId"
+                defaultValue="AUTO"
+                className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+              >
+                <option value="AUTO">Auto playbook</option>
+                {loaderData.strategies.map((strategy) => (
+                  <option key={strategy.id} value={strategy.id}>
+                    {strategy.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm">
+              <span className="text-slate-500">Wing width</span>
+              <select
+                name="widthSteps"
+                defaultValue={String(DEFAULT_WIDTH_STEPS)}
+                className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+              >
+                {[1, 2, 3].map((step) => (
+                  <option key={step} value={step}>
+                    {step}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="submit"
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white dark:bg-slate-100 dark:text-slate-900"
+            >
+              Start paper run
+            </button>
+          </Form>
 
-          {paper.active ? (
-            <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">
-              Active run #{paper.active.id}: {paper.active.instrument_id} /{" "}
-              {paper.active.strategy_id} / width {paper.active.width_steps}
-            </p>
+          {paper.activeRuns.length > 0 ? (
+            <ul className="mt-4 space-y-2">
+              {paper.activeRuns.map((run) => (
+                <li
+                  key={run.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-800"
+                >
+                  <span className="text-slate-700 dark:text-slate-200">
+                    #{run.id} · {run.instrument_id} · {run.strategy_id} · width{" "}
+                    {run.width_steps}
+                  </span>
+                  <Form method="post">
+                    <input type="hidden" name="intent" value="paper-stop" />
+                    <input type="hidden" name="runId" value={run.id} />
+                    <button
+                      type="submit"
+                      className="rounded-lg border border-rose-300 px-3 py-1.5 text-xs font-medium text-rose-700 dark:border-rose-800 dark:text-rose-300"
+                    >
+                      Stop
+                    </button>
+                  </Form>
+                </li>
+              ))}
+            </ul>
           ) : (
-            <p className="mt-4 text-sm text-slate-500">No active paper run.</p>
+            <p className="mt-4 text-sm text-slate-500">No active paper runs.</p>
           )}
 
           {paper.trades.length > 0 ? (
@@ -483,6 +495,7 @@ export default function LabPage({
               <table className="min-w-full text-sm">
                 <thead className="bg-slate-50 text-xs tracking-wide text-slate-500 uppercase dark:bg-slate-900 dark:text-slate-400">
                   <tr>
+                    <th className="px-3 py-2 text-left">Index</th>
                     <th className="px-3 py-2 text-left">Status</th>
                     <th className="px-3 py-2 text-left">Path</th>
                     <th className="px-3 py-2 text-left">Entry</th>
@@ -497,6 +510,11 @@ export default function LabPage({
                       key={trade.id}
                       className="border-t border-slate-100 dark:border-slate-800"
                     >
+                      <td className="px-3 py-2">
+                        {"instrument_id" in trade
+                          ? String(trade.instrument_id)
+                          : "—"}
+                      </td>
                       <td className="px-3 py-2 capitalize">{trade.status}</td>
                       <td className="px-3 py-2">{trade.strategy_id}</td>
                       <td className="px-3 py-2 tabular-nums">{trade.entry_at}</td>

@@ -27,6 +27,7 @@ import {
   getActiveRun,
   getOpenTrade,
   insertOpenTrade,
+  listActiveRuns,
   listPaperRuns,
   listTradesForRun,
   startPaperRun,
@@ -54,10 +55,21 @@ function isExpiryToday(instrumentId: string) {
 }
 
 export function getPaperSnapshot() {
-  const active = getActiveRun();
+  const activeRuns = listActiveRuns();
   const runs = listPaperRuns();
-  const trades = active ? listTradesForRun(active.id) : [];
-  return { active, runs, trades };
+  const trades = activeRuns.flatMap((run) =>
+    listTradesForRun(run.id).map((trade) => ({
+      ...trade,
+      instrument_id: run.instrument_id,
+    })),
+  );
+  return {
+    activeRuns,
+    /** First active run — legacy single-run UI helpers. */
+    active: activeRuns[0],
+    runs,
+    trades,
+  };
 }
 
 export function startPaper(input: {
