@@ -1,4 +1,12 @@
-.react-router
-build
 node_modules
-README.md
+.git
+.data
+data
+.env
+.env.*
+*.md
+.cursor
+canvases
+dist
+build
+.react-router

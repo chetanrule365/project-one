@@ -1,0 +1,10 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# Attach a Railway Volume mounted at /data in the dashboard.
+# Env required: DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN, DATA_DIR=/data

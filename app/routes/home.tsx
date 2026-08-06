@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
 import type { Route } from "./+types/home";
 import { IndexCard } from "../components/IndexCard";
 import type { FeedStatus, IndexQuote } from "../lib/dhan/instruments";
@@ -155,6 +156,14 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">
               Market Watch
             </h1>
+            <p className="mt-2">
+              <Link
+                to="/lab"
+                className="text-sm font-medium text-slate-600 underline-offset-2 hover:underline dark:text-slate-300"
+              >
+                Strategy Lab →
+              </Link>
+            </p>
           </div>
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <span

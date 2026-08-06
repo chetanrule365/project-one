@@ -4,9 +4,11 @@ import {
   ExpirySelect,
   OptionChainTable,
 } from "../components/OptionChainTable";
+import { StrategyCards } from "../components/StrategyCards";
 import { getIndexByParam } from "../lib/dhan/instruments";
 import { loadOptionChainPage } from "../lib/dhan/option-chain";
 import { DhanApiError, DhanConfigError } from "../lib/dhan/quotes";
+import { buildCreditSpreads } from "../lib/dhan/strategies";
 
 export function meta({ data }: Route.MetaArgs) {
   const name = data?.instrument?.name ?? "Index";
@@ -24,12 +26,19 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 
   const url = new URL(request.url);
   const requestedExpiry = url.searchParams.get("expiry");
+  const widthParam = Number(url.searchParams.get("width") ?? "2");
+  const widthSteps = Number.isFinite(widthParam)
+    ? Math.max(1, Math.min(5, Math.floor(widthParam)))
+    : 2;
 
   try {
     const chain = await loadOptionChainPage(instrument, requestedExpiry);
+    const spreads = buildCreditSpreads(chain.rows, chain.spot, widthSteps);
     return {
       instrument,
       chain,
+      spreads,
+      widthSteps,
       error: null as string | null,
     };
   } catch (error) {
@@ -43,6 +52,8 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     return {
       instrument,
       chain: null,
+      spreads: [],
+      widthSteps,
       error: message,
     };
   }
@@ -58,7 +69,8 @@ function formatNumber(value: number, digits = 2) {
 export default function IndexOptionChain({
   loaderData,
 }: Route.ComponentProps) {
-  const { instrument, chain, error } = loaderData;
+  const { instrument, chain, spreads, widthSteps, error } = loaderData;
+  const action = `/index/${instrument.id.toLowerCase()}`;
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 px-4 py-8 dark:from-gray-950 dark:via-gray-950 dark:to-gray-900">
@@ -89,7 +101,8 @@ export default function IndexOptionChain({
             <ExpirySelect
               expiries={chain.expiries}
               selected={chain.expiry}
-              action={`/index/${instrument.id.toLowerCase()}`}
+              action={action}
+              widthSteps={widthSteps}
             />
           ) : null}
         </header>
@@ -101,7 +114,15 @@ export default function IndexOptionChain({
         ) : null}
 
         {chain ? (
-          <OptionChainTable rows={chain.rows} spot={chain.spot} />
+          <>
+            <StrategyCards
+              spreads={spreads}
+              widthSteps={widthSteps}
+              action={action}
+              expiry={chain.expiry}
+            />
+            <OptionChainTable rows={chain.rows} spot={chain.spot} />
+          </>
         ) : !error ? (
           <p className="text-slate-500">Loading option chain…</p>
         ) : null}

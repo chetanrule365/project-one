@@ -112,13 +112,18 @@ export function ExpirySelect({
   expiries,
   selected,
   action,
+  widthSteps,
 }: {
   expiries: string[];
   selected: string;
   action: string;
+  widthSteps?: number;
 }) {
   return (
     <form method="get" action={action} className="flex items-center gap-2">
+      {widthSteps ? (
+        <input type="hidden" name="width" value={String(widthSteps)} />
+      ) : null}
       <label
         htmlFor="expiry"
         className="text-sm text-slate-500 dark:text-slate-400"

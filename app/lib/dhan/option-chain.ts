@@ -1,4 +1,4 @@
-import { DhanApiError, dhanPost } from "./config";
+import { DhanApiError, dhanOptionChainPost } from "./config";
 import type { IndexInstrument } from "./instruments";
 
 export type OptionSide = {
@@ -67,7 +67,13 @@ type OptionChainResponse = ApiErrorBody & {
   };
 };
 
-function errorMessage(payload: ApiErrorBody, fallback: string) {
+const EXPIRY_CACHE_MS = 10 * 60 * 1000;
+const expiryCache = new Map<string, { expiresAt: number; expiries: string[] }>();
+
+function errorMessage(payload: ApiErrorBody, status: number, fallback: string) {
+  if (status === 429) {
+    return "Dhan rate limit hit (1 option-chain request / 3s). Please wait a moment and refresh.";
+  }
   if (typeof payload.remarks === "string" && payload.remarks) {
     return payload.remarks;
   }
@@ -93,7 +99,13 @@ function mapSide(raw: OptionLegRaw | undefined): OptionSide | null {
 export async function fetchExpiryList(
   instrument: IndexInstrument,
 ): Promise<string[]> {
-  const { status, payload } = await dhanPost<ExpiryListResponse>(
+  const cacheKey = `${instrument.segment}:${instrument.securityId}`;
+  const cached = expiryCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.expiries;
+  }
+
+  const { status, payload } = await dhanOptionChainPost<ExpiryListResponse>(
     "/v2/optionchain/expirylist",
     {
       UnderlyingScrip: instrument.securityId,
@@ -105,20 +117,26 @@ export async function fetchExpiryList(
     throw new DhanApiError(
       errorMessage(
         payload,
+        status,
         `Failed to load expiries for ${instrument.name} (${status})`,
       ),
       status,
     );
   }
 
-  return payload.data ?? [];
+  const expiries = payload.data ?? [];
+  expiryCache.set(cacheKey, {
+    expiries,
+    expiresAt: Date.now() + EXPIRY_CACHE_MS,
+  });
+  return expiries;
 }
 
 export async function fetchOptionChain(
   instrument: IndexInstrument,
   expiry: string,
 ): Promise<Omit<OptionChainData, "expiries" | "expiry">> {
-  const { status, payload } = await dhanPost<OptionChainResponse>(
+  const { status, payload } = await dhanOptionChainPost<OptionChainResponse>(
     "/v2/optionchain",
     {
       UnderlyingScrip: instrument.securityId,
@@ -131,6 +149,7 @@ export async function fetchOptionChain(
     throw new DhanApiError(
       errorMessage(
         payload,
+        status,
         `Failed to load option chain for ${instrument.name} (${status})`,
       ),
       status,
