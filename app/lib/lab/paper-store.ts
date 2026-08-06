@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { getDataDir, getPaperDbPath } from "../data-dir";
 
 export type PaperRun = {
@@ -42,8 +42,20 @@ let dbSingleton: Database.Database | null = null;
 export function getPaperDb() {
   if (!dbSingleton) {
     const file = dbPath();
+    // Stale WAL/SHM from crash loops can break reopen on mounted volumes.
+    for (const suffix of ["-wal", "-shm"]) {
+      const side = `${file}${suffix}`;
+      if (existsSync(side)) {
+        try {
+          unlinkSync(side);
+          console.log(`[paper-store] removed stale ${side}`);
+        } catch (error) {
+          console.error(`[paper-store] could not remove ${side}`, error);
+        }
+      }
+    }
     try {
-      const db = new Database(file);
+      const db = new Database(file, { timeout: 5_000 });
       // DELETE is safer than WAL on some mounted volumes (e.g. Railway).
       db.pragma("journal_mode = DELETE");
       dbSingleton = db;

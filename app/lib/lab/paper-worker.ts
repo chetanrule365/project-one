@@ -60,9 +60,19 @@ function shouldSyncNow(active: NonNullable<ReturnType<typeof getActiveRun>>) {
   return false;
 }
 
-function nextDelayMs(active: ReturnType<typeof getActiveRun>) {
+function nextDelayMs(active: ReturnType<typeof getActiveRun> | null) {
   if (!active) return IDLE_SYNC_MS;
   return shouldSyncNow(active) ? ACTIVE_SYNC_MS : IDLE_SYNC_MS;
+}
+
+function safeActiveRun() {
+  try {
+    return getActiveRun();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[paper-worker] db read failed: ${message}`);
+    return null;
+  }
 }
 
 async function tick() {
@@ -70,7 +80,7 @@ async function tick() {
   if (s.running) return;
   s.running = true;
   try {
-    const active = getActiveRun();
+    const active = safeActiveRun();
     if (!active) {
       s.lastMessage = "No active paper run";
       return;
@@ -97,10 +107,13 @@ async function tick() {
 function schedule() {
   const s = state();
   if (s.timer) clearTimeout(s.timer);
-  const delay = nextDelayMs(getActiveRun());
-  s.timer = setTimeout(async () => {
-    await tick();
-    schedule();
+  const delay = nextDelayMs(safeActiveRun());
+  s.timer = setTimeout(() => {
+    void tick()
+      .catch((error) => {
+        console.error("[paper-worker] tick failed", error);
+      })
+      .finally(() => schedule());
   }, delay);
 }
 
@@ -113,14 +126,18 @@ export function ensurePaperWorker() {
     "[paper-worker] started — syncs while an active run exists (Node process must stay up)",
   );
   // Defer first tick so HTTP serve can bind PORT before any SQLite/API work.
-  setImmediate(() => {
-    void tick().finally(() => schedule());
-  });
+  setTimeout(() => {
+    void tick()
+      .catch((error) => {
+        console.error("[paper-worker] tick failed", error);
+      })
+      .finally(() => schedule());
+  }, 2_000);
 }
 
 export function getPaperWorkerStatus() {
   const s = state();
-  const active = getActiveRun();
+  const active = safeActiveRun();
   return {
     started: s.started,
     hasActiveRun: Boolean(active),
@@ -129,4 +146,10 @@ export function getPaperWorkerStatus() {
     lastError: s.lastError,
     nextMode: active && shouldSyncNow(active) ? "active" : "idle",
   };
+}
+
+// Start with the SSR server process (idempotent). Do not import this module from a
+// second bundle or you will get a second SQLite connection.
+if (process.env.NODE_ENV === "production") {
+  ensurePaperWorker();
 }

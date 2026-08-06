@@ -1,21 +1,21 @@
 /**
- * Production entry for Railway: bind HTTP first, then start the paper worker.
+ * Production HTTP entry for Railway.
+ * Paper worker starts when the SSR server build loads (shared SQLite singleton).
  */
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import compression from "compression";
 import express from "express";
 import { createRequestHandler } from "@react-router/express";
-import { ensurePaperWorker } from "../app/lib/lab/paper-worker";
+import { getDataDir } from "../app/lib/data-dir";
 
+// Log faults but do NOT exit — killing the process after listen causes Railway crash loops.
 process.on("uncaughtException", (error) => {
   console.error("[boot] uncaughtException", error);
-  process.exit(1);
 });
 process.on("unhandledRejection", (reason) => {
   console.error("[boot] unhandledRejection", reason);
-  process.exit(1);
 });
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -32,13 +32,25 @@ if (!existsSync(serverEntry)) {
 console.log(
   `[boot] PORT=${port} HOST=${host} DATA_DIR=${process.env.DATA_DIR ?? "(default ./data)"}`,
 );
-console.log("[boot] loading server build…");
 
+try {
+  const dataDir = getDataDir();
+  mkdirSync(dataDir, { recursive: true });
+  writeFileSync(path.join(dataDir, ".write-test"), new Date().toISOString());
+  console.log(`[boot] data dir writable: ${dataDir}`);
+} catch (error) {
+  console.error("[boot] data dir not writable — paper DB may fail", error);
+}
+
+console.log("[boot] loading server build…");
 const build = await import(pathToFileURL(serverEntry).href);
 console.log("[boot] server build loaded");
 
 const app = express();
 app.disable("x-powered-by");
+app.get("/healthz", (_req, res) => {
+  res.status(200).type("text/plain").send("ok");
+});
 app.use(compression());
 app.use(
   "/assets",
@@ -52,13 +64,14 @@ app.use(express.static(path.join(root, "public"), { maxAge: "1h" }));
 app.all(
   "*",
   createRequestHandler({
-    build,
+    build: build as never,
     mode: process.env.NODE_ENV,
   }),
 );
 
 app.listen(port, host, () => {
   console.log(`[boot] listening on http://${host}:${port}`);
-  ensurePaperWorker();
-  console.log("[boot] paper worker ensured");
+  setInterval(() => {
+    console.log(`[boot] heartbeat uptime=${Math.floor(process.uptime())}s`);
+  }, 60_000).unref();
 });
