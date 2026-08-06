@@ -112,8 +112,10 @@ export function ensurePaperWorker() {
   console.log(
     "[paper-worker] started — syncs while an active run exists (Node process must stay up)",
   );
-  // Kick once soon, then schedule
-  void tick().finally(() => schedule());
+  // Defer first tick so HTTP serve can bind PORT before any SQLite/API work.
+  setImmediate(() => {
+    void tick().finally(() => schedule());
+  });
 }
 
 export function getPaperWorkerStatus() {

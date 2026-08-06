@@ -14,6 +14,7 @@ FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV DATA_DIR=/data
+ENV HOST=0.0.0.0
 # Runtime needs libc for native better-sqlite3; no compiler required if built above on same image family
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
@@ -23,4 +24,5 @@ COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/public ./public
 RUN mkdir -p /data
 EXPOSE 3000
-CMD ["npm", "start"]
+# Bypass npm wrapper so signals / exit codes are clean in Railway
+CMD ["node", "--import", "tsx", "scripts/railway-start.ts"]
