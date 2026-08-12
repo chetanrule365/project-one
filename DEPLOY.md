@@ -13,7 +13,7 @@ A small always-on Node service + tiny volume usually stays near Hobby. The Free 
 
 ## What you get
 
-- Public URL for Market Watch + Strategy Lab
+- Public URL for Market Watch, Strategies, and Option Chain
 - Paper worker starts with the process (no need to keep the browser open)
 - Paper state (`paper.json`) + option cache on a **persistent volume** at `/data`
 
@@ -34,7 +34,7 @@ A small always-on Node service + tiny volume usually stays near Hobby. The Free 
 
 5. **Volume** (Settings → Volumes): create a volume, mount path **`/data`**. Without this, paper trades are wiped on every redeploy.
 6. **Networking**: generate a public domain.
-7. Open `https://YOUR-APP.up.railway.app/lab` → **Start paper run** once.
+7. Open `https://YOUR-APP.up.railway.app/strategies` → **Start paper run** once.
 
 ## Verify
 

@@ -26,7 +26,7 @@ export function IndexCard({ quote }: { quote: IndexQuote }) {
 
   return (
     <Link
-      to={`/index/${quote.id.toLowerCase()}`}
+      to={`/option-chain/${quote.id.toLowerCase()}`}
       className="block rounded-2xl border border-gray-200 bg-white/80 p-5 shadow-sm transition hover:border-slate-400 hover:shadow-md dark:border-gray-800 dark:bg-gray-900/70 dark:hover:border-slate-600"
     >
       <article>

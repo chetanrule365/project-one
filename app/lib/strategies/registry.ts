@@ -5,6 +5,10 @@ import { oiRangeFadeStrategy, OI_FADE_DEFAULTS } from "./oi-range-fade";
 import type { EntryContext, OpenPosition, Strategy, TradeProposal } from "./types";
 import type { OptionChainRow } from "../dhan/option-chain";
 import {
+  INDEX_INSTRUMENTS,
+  type IndexInstrument,
+} from "../dhan/instruments";
+import {
   buildDayStructure,
   chainAroundAtm,
   computeMaxPain,
@@ -72,12 +76,13 @@ export function pickExpiryPath(
   return null;
 }
 
-/** Live chain playbook cards for index page. */
+/** Live chain playbook cards. */
 export function buildPlaybookCards(
   rows: OptionChainRow[],
   spot: number,
   widthSteps = 2,
   quote?: { open: number; high: number; low: number; prevClose: number },
+  instrument: IndexInstrument = INDEX_INSTRUMENTS[0],
 ) {
   const subset = chainAroundAtm(rows, spot, 10);
   const maxPain = computeMaxPain(subset);
@@ -107,13 +112,6 @@ export function buildPlaybookCards(
       hour12: false,
     }).slice(0, 2),
   );
-
-  const instrument = {
-    id: "NIFTY" as const,
-    name: "Nifty 50",
-    securityId: 13,
-    segment: "IDX_I" as const,
-  };
 
   return STRATEGIES.map((strategy) => {
     const ctx: EntryContext = {
@@ -161,8 +159,10 @@ export function buildCreditSpreads(
   rows: OptionChainRow[],
   spot: number,
   widthSteps = 2,
+  quote?: { open: number; high: number; low: number; prevClose: number },
+  instrument?: IndexInstrument,
 ) {
-  return buildPlaybookCards(rows, spot, widthSteps);
+  return buildPlaybookCards(rows, spot, widthSteps, quote, instrument);
 }
 
 export type { TradeProposal as CreditSpreadProposal, Strategy };

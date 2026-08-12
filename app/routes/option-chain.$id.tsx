@@ -1,14 +1,13 @@
-import type { Route } from "./+types/index.$id";
+import { Link } from "react-router";
+import type { Route } from "./+types/option-chain.$id";
+import { AppNav } from "../components/AppNav";
 import {
-  BackToWatch,
   ExpirySelect,
   OptionChainTable,
 } from "../components/OptionChainTable";
-import { StrategyCards } from "../components/StrategyCards";
-import { getIndexByParam } from "../lib/dhan/instruments";
+import { INDEX_INSTRUMENTS, getIndexByParam } from "../lib/dhan/instruments";
 import { loadOptionChainPage } from "../lib/dhan/option-chain";
 import { DhanApiError, DhanConfigError } from "../lib/dhan/quotes";
-import { buildCreditSpreads } from "../lib/dhan/strategies";
 
 export function meta({ data }: Route.MetaArgs) {
   const name = data?.instrument?.name ?? "Index";
@@ -26,19 +25,12 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 
   const url = new URL(request.url);
   const requestedExpiry = url.searchParams.get("expiry");
-  const widthParam = Number(url.searchParams.get("width") ?? "2");
-  const widthSteps = Number.isFinite(widthParam)
-    ? Math.max(1, Math.min(5, Math.floor(widthParam)))
-    : 2;
 
   try {
     const chain = await loadOptionChainPage(instrument, requestedExpiry);
-    const spreads = buildCreditSpreads(chain.rows, chain.spot, widthSteps);
     return {
       instrument,
       chain,
-      spreads,
-      widthSteps,
       error: null as string | null,
     };
   } catch (error) {
@@ -52,8 +44,6 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     return {
       instrument,
       chain: null,
-      spreads: [],
-      widthSteps,
       error: message,
     };
   }
@@ -66,18 +56,16 @@ function formatNumber(value: number, digits = 2) {
   });
 }
 
-export default function IndexOptionChain({
+export default function OptionChainPage({
   loaderData,
 }: Route.ComponentProps) {
-  const { instrument, chain, spreads, widthSteps, error } = loaderData;
-  const action = `/index/${instrument.id.toLowerCase()}`;
+  const { instrument, chain, error } = loaderData;
+  const action = `/option-chain/${instrument.id.toLowerCase()}`;
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 px-4 py-8 dark:from-gray-950 dark:via-gray-950 dark:to-gray-900">
       <div className="mx-auto max-w-6xl">
-        <div className="mb-6">
-          <BackToWatch />
-        </div>
+        <AppNav />
 
         <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -95,6 +83,21 @@ export default function IndexOptionChain({
                 </span>
               </p>
             ) : null}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {INDEX_INSTRUMENTS.map((item) => (
+                <Link
+                  key={item.id}
+                  to={`/option-chain/${item.id.toLowerCase()}`}
+                  className={`rounded-lg px-2.5 py-1 text-xs font-medium ${
+                    item.id === instrument.id
+                      ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                  }`}
+                >
+                  {item.name}
+                </Link>
+              ))}
+            </div>
           </div>
 
           {chain ? (
@@ -102,7 +105,6 @@ export default function IndexOptionChain({
               expiries={chain.expiries}
               selected={chain.expiry}
               action={action}
-              widthSteps={widthSteps}
             />
           ) : null}
         </header>
@@ -114,15 +116,7 @@ export default function IndexOptionChain({
         ) : null}
 
         {chain ? (
-          <>
-            <StrategyCards
-              spreads={spreads}
-              widthSteps={widthSteps}
-              action={action}
-              expiry={chain.expiry}
-            />
-            <OptionChainTable rows={chain.rows} spot={chain.spot} />
-          </>
+          <OptionChainTable rows={chain.rows} spot={chain.spot} />
         ) : !error ? (
           <p className="text-slate-500">Loading option chain…</p>
         ) : null}

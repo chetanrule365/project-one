@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router";
 import type { Route } from "./+types/home";
+import { AppNav } from "../components/AppNav";
 import { IndexCard } from "../components/IndexCard";
 import type { FeedStatus, IndexQuote } from "../lib/dhan/instruments";
 import { INDEX_INSTRUMENTS } from "../lib/dhan/instruments";
@@ -13,7 +13,7 @@ import {
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: "Market Watch" },
+    { title: "Home · Market Watch" },
     {
       name: "description",
       content: "Live Nifty, Bank Nifty, and Sensex prices via Dhan",
@@ -148,6 +148,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 px-4 py-10 dark:from-gray-950 dark:via-gray-950 dark:to-gray-900">
       <div className="mx-auto max-w-5xl">
+        <AppNav />
         <header className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-sm font-medium tracking-wide text-slate-500 uppercase">
@@ -156,13 +157,8 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">
               Market Watch
             </h1>
-            <p className="mt-2">
-              <Link
-                to="/lab"
-                className="text-sm font-medium text-slate-600 underline-offset-2 hover:underline dark:text-slate-300"
-              >
-                Strategy Lab →
-              </Link>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+              Live quotes — open an index for its option chain.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3 text-sm">
