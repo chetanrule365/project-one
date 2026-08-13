@@ -196,9 +196,10 @@ export default function BacktestingPage({
             Backtesting
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
-            Historical expiry-day playbook. Auto path: ORB → Iron Condor → Max
-            Pain → OI fade (or sit out). ORB uses hourly bars (not true 15m
-            opening range). No real orders.
+            Historical expiry-day playbook. Auto path: Iron Condor → OI fade →
+            Max Pain → ORB (or sit out). ORB is last, needs a clean break, and
+            skips rich ATM premium. Hourly bars, not a true 15m opening range.
+            No real orders.
           </p>
         </header>
 

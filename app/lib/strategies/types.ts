@@ -123,8 +123,30 @@ export const ORB_HOURS = 1;
 /** No new long buys after this hour */
 export const NO_LONG_AFTER_HOUR = 13;
 
+/** ORB ATM entries only in this IST hour window (10 ≤ hour < this). */
+export const ORB_ENTRY_UNTIL_HOUR = 11;
+
 /** Quiet day: prior range below this % of spot */
 export const QUIET_PRIOR_RANGE_PCT = 1.8;
+
+/** Live session: treat as quiet if today's high–low is within this % of prev close. */
+export const LIVE_QUIET_RANGE_PCT = 1.2;
+
+/** Live ORB: break vs open must exceed this fraction of spot. */
+export const ORB_BREAK_PCT = 0.004;
+
+export const ORB_MIN_BREAK_PTS: Record<string, number> = {
+  NIFTY: 80,
+  BANKNIFTY: 180,
+  SENSEX: 280,
+};
+
+/** Skip expiry ATM buys when ask is richer than this (points). */
+export const MAX_EXPIRY_DEBIT_PTS: Record<string, number> = {
+  NIFTY: 70,
+  BANKNIFTY: 140,
+  SENSEX: 90,
+};
 
 /** Max-pain distance band (pts) */
 export const MAX_PAIN_MIN_DIST = 80;

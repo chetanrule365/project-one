@@ -19,7 +19,7 @@ import {
 } from "./types";
 
 /**
- * Iron Condor — quiet range Tuesday after morning range forms (~10:00).
+ * Iron Condor — quiet range expiry after morning range forms (~10:00).
  * Short ATM±2, long wings widthSteps further (default 2 ≈ 100 pts).
  */
 export const ironCondorStrategy = assertStrategy({
@@ -27,7 +27,7 @@ export const ironCondorStrategy = assertStrategy({
   name: "Iron Condor",
   bias: "Range / theta",
   description:
-    "Sell ATM±2 call & put, buy further OTM wings. Quiet Tuesdays after morning range.",
+    "Sell ATM±2 call & put, buy further OTM wings. Quiet expiry after morning range.",
   requiredStrikeKeys(widthSteps) {
     const w = Math.max(1, widthSteps);
     return [
@@ -81,7 +81,7 @@ export const ironCondorStrategy = assertStrategy({
         strategyId: "IRON_CONDOR",
         name: "Iron Condor",
         bias: "Range / theta",
-        description: "Expiry-day iron condor on quiet range Tuesday",
+        description: "Expiry-day iron condor on quiet range",
         legs,
         maxProfit: credit,
         maxLoss: Math.max(0, width - credit),
@@ -121,7 +121,7 @@ export const ironCondorStrategy = assertStrategy({
       strategyId: "IRON_CONDOR",
       name: "Iron Condor",
       bias: "Range / theta",
-      description: "Expiry-day iron condor on quiet range Tuesday",
+        description: "Expiry-day iron condor on quiet range",
       legs,
       maxProfit: credit,
       maxLoss: Math.max(0, width - credit),

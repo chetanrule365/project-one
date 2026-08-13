@@ -9,6 +9,7 @@ import {
   type IndexInstrument,
 } from "../dhan/instruments";
 import {
+  applyLiveQuoteStructure,
   buildDayStructure,
   chainAroundAtm,
   computeMaxPain,
@@ -46,7 +47,7 @@ export function positionDefaults(strategyId: string): Partial<OpenPosition> {
 }
 
 /**
- * Auto picker priority: ORB → Iron Condor → Max Pain → OI fade → sit out.
+ * Auto picker: sell premium first on expiry, ORB last and only if still clean.
  */
 export function pickExpiryPath(
   ctx: EntryContext,
@@ -56,7 +57,7 @@ export function pickExpiryPath(
     ? STRATEGIES.filter((s) => strategyIds.includes(s.id))
     : STRATEGIES;
 
-  const order = ["ORB_ATM", "IRON_CONDOR", "MAX_PAIN_REV", "OI_RANGE_FADE"];
+  const order = ["IRON_CONDOR", "OI_RANGE_FADE", "MAX_PAIN_REV", "ORB_ATM"];
   for (const id of order) {
     const strategy = allowed.find((s) => s.id === id);
     if (!strategy) continue;
@@ -67,7 +68,7 @@ export function pickExpiryPath(
       id === "ORB_ATM"
         ? `ORB ${ctx.structure.orbBrokenUp ? "up" : "down"} → ATM buy`
         : id === "IRON_CONDOR"
-          ? "Quiet range Tuesday → Iron Condor"
+          ? "Quiet range expiry → Iron Condor"
           : id === "MAX_PAIN_REV"
             ? `Max pain ${ctx.structure.maxPain} (${Math.round(ctx.structure.distToMaxPain ?? 0)} pts) → reversion`
             : "Near OI wall → range fade";
@@ -100,10 +101,9 @@ export function buildPlaybookCards(
     putOiSupport: walls.putSupport,
     callOiResistance: walls.callResist,
   });
-  // Without intraday bars, infer mild structure for live preview
-  structure.quietDay = true;
-  structure.insidePriorRange =
-    open >= structure.priorLow && open <= structure.priorHigh;
+  if (quote) {
+    applyLiveQuoteStructure(structure, quote, spot, instrument.id);
+  }
 
   const hour = Number(
     new Date().toLocaleTimeString("en-GB", {
