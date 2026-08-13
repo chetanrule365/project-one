@@ -151,6 +151,31 @@ export function listTradesForRun(runId: number) {
     .sort((a, b) => b.id - a.id);
 }
 
+export type PaperTradeExportRow = PaperTrade & {
+  instrument_id: string;
+  run_strategy_id: string;
+  run_status: PaperRun["status"] | "";
+  width_steps: number;
+};
+
+/** All trades joined to their run, newest first. */
+export function listAllTradesWithInstrument(): PaperTradeExportRow[] {
+  const state = load();
+  const runsById = new Map(state.runs.map((run) => [run.id, run]));
+  return [...state.trades]
+    .sort((a, b) => b.id - a.id)
+    .map((trade) => {
+      const run = runsById.get(trade.run_id);
+      return {
+        ...trade,
+        instrument_id: run?.instrument_id ?? "",
+        run_strategy_id: run?.strategy_id ?? "",
+        run_status: run?.status ?? "",
+        width_steps: run?.width_steps ?? trade.width,
+      };
+    });
+}
+
 export function getOpenTrade(runId: number) {
   return load()
     .trades.filter((trade) => trade.run_id === runId && trade.status === "open")

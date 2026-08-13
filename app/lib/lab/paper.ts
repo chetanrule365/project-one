@@ -29,6 +29,7 @@ import {
   insertOpenTrade,
   listActiveRuns,
   listPaperRuns,
+  listAllTradesWithInstrument,
   listTradesForRun,
   startPaperRun,
   stopPaperRun,
@@ -57,12 +58,7 @@ function isExpiryToday(instrumentId: string) {
 export function getPaperSnapshot() {
   const activeRuns = listActiveRuns();
   const runs = listPaperRuns();
-  const trades = activeRuns.flatMap((run) =>
-    listTradesForRun(run.id).map((trade) => ({
-      ...trade,
-      instrument_id: run.instrument_id,
-    })),
-  );
+  const trades = listAllTradesWithInstrument();
   return {
     activeRuns,
     /** First active run — legacy single-run UI helpers. */
