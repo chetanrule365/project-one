@@ -276,13 +276,26 @@ export default function StrategiesPage({
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white/90 p-5 dark:border-slate-800 dark:bg-slate-900/70">
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
-            Paper trading
-          </h2>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            One active run per index. Worker syncs while the{" "}
-            <strong>Node server</strong> is up (browser can close).
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+                Paper trading
+              </h2>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                One active run per index. Worker syncs while the{" "}
+                <strong>Node server</strong> is up (browser can close).
+              </p>
+            </div>
+            {paper.trades.length > 0 ? (
+              <a
+                href="/api/paper-trades.xls"
+                download
+                className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900"
+              >
+                Download Excel
+              </a>
+            ) : null}
+          </div>
 
           {loaderData.worker?.started ? (
             <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
