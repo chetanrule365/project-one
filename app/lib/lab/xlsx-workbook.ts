@@ -111,6 +111,7 @@ function utf8(xml: string) {
 export function buildXlsxWorkbook(
   sheetName: string,
   rows: CellValue[][],
+  options?: { defaultColWidth?: number; dateColIndexes?: number[] },
 ): Buffer {
   const strings: string[] = [];
   const stringIndex = new Map<string, number>();
@@ -124,6 +125,12 @@ export function buildXlsxWorkbook(
   };
 
   const width = rows.reduce((max, row) => Math.max(max, row.length), 0);
+  const defaultWidth = options?.defaultColWidth ?? 14;
+  const dateCols = new Set(options?.dateColIndexes ?? []);
+  const colXml = Array.from({ length: Math.max(width, 1) }, (_, i) => {
+    const w = dateCols.has(i) ? 20 : defaultWidth;
+    return `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`;
+  }).join("");
   const lastCol = colLetter(Math.max(0, width - 1));
   const lastRow = Math.max(1, rows.length);
   const dimension = `A1:${lastCol}${lastRow}`;
@@ -230,6 +237,7 @@ export function buildXlsxWorkbook(
 <dimension ref="${dimension}"/>
 <sheetViews><sheetView tabSelected="1" workbookViewId="0"/></sheetViews>
 <sheetFormatPr defaultRowHeight="15"/>
+<cols>${colXml}</cols>
 <sheetData>${sheetRows.join("")}</sheetData>
 </worksheet>`),
     },

@@ -7,6 +7,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { getDataDir } from "../data-dir";
+import type { Leg } from "../strategies/types";
 
 export type PaperRun = {
   id: number;
@@ -36,6 +37,9 @@ export type PaperTrade = {
   entry_at: string;
   expiry_at: string;
   exit_at: string | null;
+  /** Full option legs. Older rows omit this and are inferred. */
+  legs?: Leg[];
+  entry_hour?: number | null;
 };
 
 type PaperState = {
@@ -215,5 +219,17 @@ export function closeTrade(
   trade.pnl_points = input.pnlPoints;
   trade.pnl_inr = input.pnlInr;
   trade.exit_at = new Date().toISOString();
+  save(state);
+}
+
+export function patchTradePnl(
+  tradeId: number,
+  input: { pnlPoints: number; pnlInr: number },
+) {
+  const state = load();
+  const trade = state.trades.find((item) => item.id === tradeId);
+  if (!trade) return;
+  trade.pnl_points = input.pnlPoints;
+  trade.pnl_inr = input.pnlInr;
   save(state);
 }

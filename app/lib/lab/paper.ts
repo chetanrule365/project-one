@@ -19,7 +19,6 @@ import {
   DEFAULT_WIDTH_STEPS,
   FLAT_BY_HOUR,
   lotSizeFor,
-  type OpenPosition,
   type Strategy,
 } from "../strategies/types";
 import {
@@ -31,11 +30,17 @@ import {
   listPaperRuns,
   listAllTradesWithInstrument,
   listTradesForRun,
+  patchTradePnl,
   startPaperRun,
   stopPaperRun,
   type PaperRun,
   type PaperTrade,
 } from "./paper-store";
+import {
+  pnlLooksBroken,
+  positionFromTrade,
+  settleTradePoints,
+} from "./paper-position";
 
 function todayIst() {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
@@ -56,6 +61,7 @@ function isExpiryToday(instrumentId: string) {
 }
 
 export function getPaperSnapshot() {
+  repairStoredPaperPnls();
   const activeRuns = listActiveRuns();
   const runs = listPaperRuns();
   const trades = listAllTradesWithInstrument();
@@ -81,6 +87,28 @@ export function startPaper(input: {
 
 export function stopPaper(runId: number) {
   stopPaperRun(runId);
+}
+
+export function repairStoredPaperPnls() {
+  const lotByInstrument = new Map<string, number>();
+  for (const trade of listAllTradesWithInstrument()) {
+    if (trade.status !== "closed") continue;
+    if (trade.spot_exit == null || trade.pnl_points == null) continue;
+    const corrected = settleTradePoints(trade, trade.spot_exit);
+    if (
+      !pnlLooksBroken(trade.pnl_points, trade.credit, trade.spot_exit, corrected)
+    ) {
+      continue;
+    }
+    const lot =
+      lotByInstrument.get(trade.instrument_id) ??
+      lotSizeFor(trade.instrument_id);
+    lotByInstrument.set(trade.instrument_id, lot);
+    patchTradePnl(trade.id, {
+      pnlPoints: corrected,
+      pnlInr: corrected * lot,
+    });
+  }
 }
 
 function resolveStrategies(strategyId: string): Strategy[] {
@@ -116,35 +144,12 @@ export async function syncPaper(run?: PaperRun): Promise<{
   let opened: PaperTrade | null = null;
 
   if (open) {
-    const settleStrategy = getStrategy(open.strategy_id) ?? strategies[0];
     const defaults = positionDefaults(open.strategy_id);
-    // Reconstruct minimal position from stored 2-leg summary
-    const position: OpenPosition = {
-      strategyId: open.strategy_id,
-      legs: [
-        {
-          right: open.short_side as "CE" | "PE",
-          strike: open.short_strike,
-          strikeKey: "ATM",
-          qty: open.credit >= 0 ? -1 : 1,
-          premium: Math.abs(open.credit),
-        },
-        {
-          right: open.long_side as "CE" | "PE",
-          strike: open.long_strike,
-          strikeKey: "ATM",
-          qty: open.credit >= 0 ? 1 : -1,
-          premium: 0,
-        },
-      ],
-      netCredit: open.credit,
-      width: open.width,
-      entryAt: open.entry_at,
-      expiryAt: open.expiry_at,
+    const position = {
+      ...positionFromTrade(open),
       ...defaults,
     };
-
-    const pnlPoints = settleStrategy.settle(position, chain.spot);
+    const pnlPoints = settleTradePoints(open, chain.spot, chain.rows);
     const isDebit = open.credit < 0;
     const risk = Math.abs(open.credit) || 1;
     const stopLevel = isDebit
@@ -153,9 +158,15 @@ export async function syncPaper(run?: PaperRun): Promise<{
     const hitStop = pnlPoints <= stopLevel;
     const flatBy =
       defaults.flatByHour !== undefined && hour >= defaults.flatByHour;
-    const expired = today > open.expiry_at || (today === open.expiry_at && hour >= FLAT_BY_HOUR);
+    const timedOut =
+      defaults.timeStopHours !== undefined &&
+      position.entryHour !== undefined &&
+      hour >= position.entryHour + defaults.timeStopHours;
+    const expired =
+      today > open.expiry_at ||
+      (today === open.expiry_at && hour >= FLAT_BY_HOUR);
 
-    if (hitStop || flatBy || expired) {
+    if (hitStop || flatBy || timedOut || expired) {
       const exitPnl = hitStop ? stopLevel : pnlPoints;
       closeTrade(open.id, {
         spotExit: chain.spot,
@@ -265,6 +276,8 @@ export async function syncPaper(run?: PaperRun): Promise<{
         spot_entry: chain.spot,
         entry_at: today,
         expiry_at: today,
+        legs: picked.proposal.legs,
+        entry_hour: hour,
       });
     }
   }
