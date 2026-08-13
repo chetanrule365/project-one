@@ -18,6 +18,7 @@ import {
   startPaper,
   stopPaper,
 } from "../lib/lab/paper";
+import { formatPaperLegs } from "../lib/lab/paper-position";
 import {
   ensurePaperWorker,
   getPaperWorkerStatus,
@@ -432,8 +433,7 @@ export default function StrategiesPage({
                       <td className="px-3 py-2">{trade.strategy_id}</td>
                       <td className="px-3 py-2 tabular-nums">{trade.entry_at}</td>
                       <td className="px-3 py-2 text-right tabular-nums">
-                        {trade.short_strike}/{trade.long_strike}{" "}
-                        {trade.short_side}
+                        {formatPaperLegs(trade)}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">
                         {formatNumber(trade.credit)}

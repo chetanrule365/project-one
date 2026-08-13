@@ -1,5 +1,5 @@
 import { getOpenTrade, listActiveRuns, type PaperRun } from "./paper-store";
-import { syncPaper } from "./paper";
+import { repairStoredPaperPnls, syncPaper } from "./paper";
 import { FLAT_BY_HOUR } from "../strategies/types";
 import { expiryWeekday, istWeekday } from "../strategies/expiry-day";
 
@@ -80,6 +80,7 @@ async function tick() {
   if (s.running) return;
   s.running = true;
   try {
+    repairStoredPaperPnls();
     const runs = safeActiveRuns();
     if (runs.length === 0) {
       s.lastMessage = "No active paper runs";

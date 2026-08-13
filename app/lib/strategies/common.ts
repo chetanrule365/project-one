@@ -49,9 +49,11 @@ export function markLeg(
   spot: number,
   premiums?: Record<string, number>,
 ) {
-  const key = `${leg.strikeKey}:${leg.right}`;
-  const px = premiums?.[key];
-  if (px !== undefined && px >= 0) return px;
+  if (leg.strike <= 0) return 0;
+  const keyed = premiums?.[`${leg.strikeKey}:${leg.right}`];
+  if (keyed !== undefined && keyed >= 0) return keyed;
+  const byStrike = premiums?.[`${leg.strike}:${leg.right}`];
+  if (byStrike !== undefined && byStrike >= 0) return byStrike;
   return intrinsic(leg.right, leg.strike, spot);
 }
 
@@ -90,18 +92,16 @@ export function proposalSummary(legs: Leg[]): Pick<
   const longs = legs.filter((l) => l.qty > 0);
   const short = shorts[0];
   const long = longs[0] ?? shorts[1] ?? short;
-  const width = Math.max(
-    ...shorts.flatMap((s) =>
-      longs
-        .filter((l) => l.right === s.right)
-        .map((l) => Math.abs(l.strike - s.strike)),
-    ),
-    50,
+  const pairWidths = shorts.flatMap((s) =>
+    longs
+      .filter((l) => l.right === s.right)
+      .map((l) => Math.abs(l.strike - s.strike)),
   );
+  const width = pairWidths.length > 0 ? Math.max(...pairWidths) : 0;
   return {
     primaryShortStrike: short?.strike ?? 0,
-    primaryLongStrike: long?.strike ?? short?.strike ?? 0,
-    primaryShortSide: short?.right ?? "CE",
+    primaryLongStrike: long?.strike ?? 0,
+    primaryShortSide: short?.right ?? long?.right ?? "CE",
     primaryLongSide: long?.right ?? short?.right ?? "CE",
     width,
   };
