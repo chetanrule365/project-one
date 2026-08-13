@@ -1,9 +1,13 @@
 import type { OptionChainRow } from "../dhan/option-chain";
 import type { RollingBar } from "../dhan/rolling-options";
 import {
+  LIVE_QUIET_RANGE_PCT,
+  MAX_EXPIRY_DEBIT_PTS,
   MAX_PAIN_MAX_DIST,
   MAX_PAIN_MIN_DIST,
+  ORB_BREAK_PCT,
   ORB_HOURS,
+  ORB_MIN_BREAK_PTS,
   QUIET_PRIOR_RANGE_PCT,
   type DayStructure,
 } from "./types";
@@ -278,4 +282,50 @@ export function chainAroundAtm(rows: OptionChainRow[], spot: number, n = 8) {
   const from = Math.max(0, atm - n);
   const to = Math.min(rows.length, atm + n + 1);
   return rows.slice(from, to);
+}
+
+export function orbBreakBufferPts(instrumentId: string, spot: number) {
+  const floor = ORB_MIN_BREAK_PTS[instrumentId] ?? 80;
+  return Math.max(floor, spot * ORB_BREAK_PCT);
+}
+
+export function maxExpiryDebitPts(instrumentId: string) {
+  return MAX_EXPIRY_DEBIT_PTS[instrumentId] ?? 70;
+}
+
+/** True when a directional buy would fight expiry pin toward max pain. */
+export function orbFightsMaxPain(
+  structure: DayStructure,
+  direction: "up" | "down",
+) {
+  if (structure.distToMaxPain === null) return false;
+  if (direction === "up" && structure.distToMaxPain > 0) return true;
+  if (direction === "down" && structure.distToMaxPain < 0) return true;
+  return false;
+}
+
+export function applyLiveQuoteStructure(
+  structure: DayStructure,
+  quote: { open: number; high: number; low: number; prevClose: number },
+  spot: number,
+  instrumentId: string,
+) {
+  const open = quote.open || structure.open;
+  const prev = quote.prevClose || structure.priorClose || spot;
+  const rangePct = prev > 0 ? ((quote.high - quote.low) / prev) * 100 : 99;
+  structure.quietDay = rangePct <= LIVE_QUIET_RANGE_PCT;
+  structure.open = open;
+
+  const buf = orbBreakBufferPts(instrumentId, spot);
+  const chop =
+    quote.high >= open + buf * 0.6 && quote.low <= open - buf * 0.6;
+  let orbBrokenUp = !chop && spot >= open + buf;
+  let orbBrokenDown = !chop && spot <= open - buf;
+  if (orbBrokenUp && orbBrokenDown) {
+    orbBrokenUp = false;
+    orbBrokenDown = false;
+  }
+  structure.orbBrokenUp = orbBrokenUp;
+  structure.orbBrokenDown = orbBrokenDown;
+  return structure;
 }

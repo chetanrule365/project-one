@@ -8,7 +8,7 @@ import {
   strikeAt,
   strikeKey,
 } from "./common";
-import { inMaxPainBand } from "./expiry-day";
+import { inMaxPainBand, maxExpiryDebitPts } from "./expiry-day";
 import {
   FLAT_BY_HOUR,
   STOP_LOSS_DEBIT_FRAC,
@@ -50,6 +50,7 @@ export const maxPainStrategy = assertStrategy({
       const side = right === "CE" ? row.ce : row.pe;
       const px = longPremium(side);
       if (px === null || px <= 0) return null;
+      if (px > maxExpiryDebitPts(ctx.instrument.id)) return null;
       const proposal = buildProposal({
         strategyId: "MAX_PAIN_REV",
         name: "Max Pain Reversion",
@@ -67,6 +68,7 @@ export const maxPainStrategy = assertStrategy({
     const px = premiumAt(ctx.premiums, key, right);
     const strike = strikeAt(ctx.strikes, key);
     if (px === undefined || px <= 0 || strike === undefined) return null;
+    if (px > maxExpiryDebitPts(ctx.instrument.id)) return null;
     void halfway;
     return buildProposal({
       strategyId: "MAX_PAIN_REV",

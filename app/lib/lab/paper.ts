@@ -8,6 +8,7 @@ import {
   positionDefaults,
 } from "../strategies/registry";
 import {
+  applyLiveQuoteStructure,
   buildDayStructure,
   chainAroundAtm,
   computeMaxPain,
@@ -226,20 +227,8 @@ export async function syncPaper(run?: PaperRun): Promise<{
       putOiSupport: walls.putSupport,
       callOiResistance: walls.callResist,
     });
-    // Live: treat day as quiet if day's range so far is calm
     if (quote) {
-      const rangePct =
-        quote.prevClose > 0
-          ? ((quote.high - quote.low) / quote.prevClose) * 100
-          : 99;
-      structure.quietDay = rangePct <= 1.2;
-      structure.orbBrokenUp = chain.spot > quote.open * 1.003;
-      structure.orbBrokenDown = chain.spot < quote.open * 0.997;
-      // Mutual exclusivity for clean ORB
-      if (structure.orbBrokenUp && structure.orbBrokenDown) {
-        structure.orbBrokenUp = false;
-        structure.orbBrokenDown = false;
-      }
+      applyLiveQuoteStructure(structure, quote, chain.spot, instrument.id);
     }
 
     const ctx = {
