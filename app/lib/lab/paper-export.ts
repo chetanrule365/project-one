@@ -2,26 +2,7 @@ import {
   listAllTradesWithInstrument,
   type PaperTradeExportRow,
 } from "./paper-store";
-
-function escapeXml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
-
-function stringCell(value: string | number | null | undefined) {
-  const text = value == null ? "" : String(value);
-  return `<Cell><Data ss:Type="String">${escapeXml(text)}</Data></Cell>`;
-}
-
-function numberCell(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(value)) {
-    return `<Cell><Data ss:Type="String"></Data></Cell>`;
-  }
-  return `<Cell><Data ss:Type="Number">${value}</Data></Cell>`;
-}
+import { buildXlsxWorkbook } from "./xlsx-workbook";
 
 const HEADERS = [
   "Trade ID",
@@ -49,51 +30,41 @@ const HEADERS = [
 
 export function paperTradesExportFilename(day = new Date()) {
   const stamp = day.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-  return `paper-trades-${stamp}.xls`;
+  return `paper-trades-${stamp}.xlsx`;
 }
 
-/** Excel SpreadsheetML workbook — opens in Excel, Sheets, and LibreOffice. */
+function tradeRow(trade: PaperTradeExportRow) {
+  return [
+    trade.id,
+    trade.run_id,
+    trade.instrument_id,
+    trade.run_strategy_id,
+    trade.strategy_id,
+    trade.status,
+    trade.short_strike,
+    trade.long_strike,
+    trade.short_side,
+    trade.long_side,
+    trade.credit,
+    trade.width,
+    trade.spot_entry,
+    trade.spot_exit,
+    trade.pnl_points,
+    trade.pnl_inr,
+    trade.entry_at,
+    trade.expiry_at,
+    trade.exit_at,
+    trade.run_status,
+    trade.width_steps,
+  ];
+}
+
+/** Real Office Open XML .xlsx workbook. */
 export function buildPaperTradesWorkbook(
   trades: PaperTradeExportRow[] = listAllTradesWithInstrument(),
 ) {
-  const header = `<Row>${HEADERS.map((h) => stringCell(h)).join("")}</Row>`;
-  const rows = trades.map((trade) => {
-    const cells = [
-      numberCell(trade.id),
-      numberCell(trade.run_id),
-      stringCell(trade.instrument_id),
-      stringCell(trade.run_strategy_id),
-      stringCell(trade.strategy_id),
-      stringCell(trade.status),
-      numberCell(trade.short_strike),
-      numberCell(trade.long_strike),
-      stringCell(trade.short_side),
-      stringCell(trade.long_side),
-      numberCell(trade.credit),
-      numberCell(trade.width),
-      numberCell(trade.spot_entry),
-      numberCell(trade.spot_exit),
-      numberCell(trade.pnl_points),
-      numberCell(trade.pnl_inr),
-      stringCell(trade.entry_at),
-      stringCell(trade.expiry_at),
-      stringCell(trade.exit_at),
-      stringCell(trade.run_status),
-      numberCell(trade.width_steps),
-    ];
-    return `<Row>${cells.join("")}</Row>`;
-  });
-
-  return `<?xml version="1.0"?>
-<?mso-application progid="Excel.Sheet"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
- <Worksheet ss:Name="Paper trades">
-  <Table>
-${header}
-${rows.join("\n")}
-  </Table>
- </Worksheet>
-</Workbook>
-`;
+  return buildXlsxWorkbook("Paper trades", [
+    [...HEADERS],
+    ...trades.map(tradeRow),
+  ]);
 }
