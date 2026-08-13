@@ -21,6 +21,14 @@ export function getDhanCredentials() {
     );
   }
 
+  // DhanHQ v2 access tokens are JWTs (typically 200+ chars, three dot-separated parts).
+  // API key / API secret / truncated values produce a generic 401 from /marketfeed/ohlc.
+  if (accessToken.split(".").length !== 3 || accessToken.length < 80) {
+    throw new DhanConfigError(
+      "DHAN_ACCESS_TOKEN is not a Dhan JWT access token. In web.dhan.co open My Profile → Access DhanHQ APIs and generate an Access Token (long JWT, valid ~24 hours). Do not use the API key or API secret.",
+    );
+  }
+
   return { clientId, accessToken };
 }
 
@@ -39,6 +47,34 @@ export class DhanApiError extends Error {
     this.name = "DhanApiError";
     this.status = status;
   }
+}
+
+/** Pull a human-readable message out of Dhan JSON, including `{ data: { "808": "..." } }` auth errors. */
+export function formatDhanError(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== "object") return fallback;
+  const body = payload as Record<string, unknown>;
+
+  for (const key of ["errorMessage", "message"] as const) {
+    const value = body[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+
+  if (typeof body.remarks === "string" && body.remarks.trim()) {
+    return body.remarks;
+  }
+
+  const data = body.data;
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const coded = Object.entries(data as Record<string, unknown>)
+      .filter(
+        ([code, value]) =>
+          /^\d+$/.test(code) && typeof value === "string" && value.trim(),
+      )
+      .map(([code, value]) => `${code}: ${value}`);
+    if (coded.length) return coded.join("; ");
+  }
+
+  return fallback;
 }
 
 export async function dhanPost<T>(

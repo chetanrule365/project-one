@@ -2,6 +2,7 @@ import {
   DhanApiError,
   DhanConfigError,
   dhanPost,
+  formatDhanError,
   getDhanCredentials,
   isDhanSandbox,
 } from "./config";
@@ -87,10 +88,10 @@ async function fetchQuoteFromCharts(
 
   if (status >= 400) {
     throw new DhanApiError(
-      payload.errorMessage ||
-        payload.message ||
-        payload.remarks ||
+      formatDhanError(
+        payload,
         `Dhan chart request failed for ${instrument.name} (${status})`,
+      ),
       status,
     );
   }
@@ -130,10 +131,7 @@ async function fetchQuotesFromMarketfeed(): Promise<IndexQuote[]> {
 
   if (status >= 400) {
     throw new DhanApiError(
-      payload.errorMessage ||
-        payload.message ||
-        payload.remarks ||
-        `Dhan OHLC request failed (${status})`,
+      formatDhanError(payload, `Dhan OHLC request failed (${status})`),
       status,
     );
   }
