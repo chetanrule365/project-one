@@ -1,16 +1,15 @@
 import type { Route } from "./+types/api.paper-trades-export";
 import {
-  buildPaperTradesWorkbook,
+  buildPaperTradesCsv,
   paperTradesExportFilename,
 } from "../lib/lab/paper-export";
 
 export async function loader({}: Route.LoaderArgs) {
-  const body = buildPaperTradesWorkbook();
+  const body = buildPaperTradesCsv();
   const filename = paperTradesExportFilename();
-  return new Response(new Uint8Array(body), {
+  return new Response(body, {
     headers: {
-      "Content-Type":
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": `attachment; filename="${filename}"`,
       "Cache-Control": "no-store",
     },
