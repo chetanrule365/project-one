@@ -52,13 +52,24 @@ export function isIstTradingWeekday(day: string) {
   return weekday >= 1 && weekday <= 5;
 }
 
+/** Normalize Dhan expiry strings to YYYY-MM-DD when possible. */
+export function normalizeExpiryDay(expiry: string) {
+  const trimmed = expiry.trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+  const swapped = trimmed.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (swapped) return `${swapped[3]}-${swapped[2]}-${swapped[1]}`;
+  const parsed = Date.parse(trimmed);
+  if (!Number.isNaN(parsed)) {
+    return new Date(parsed).toLocaleDateString("en-CA", {
+      timeZone: "Asia/Kolkata",
+    });
+  }
+  return trimmed;
+}
+
 /** Dhan expiry list items are typically YYYY-MM-DD. */
 export function expiryEqualsDay(expiry: string, day: string) {
-  const trimmed = expiry.trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10) === day;
-  const swapped = trimmed.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  if (swapped) return `${swapped[3]}-${swapped[2]}-${swapped[1]}` === day;
-  return false;
+  return normalizeExpiryDay(expiry) === day;
 }
 
 export function isExpiryCalendarDay(instrumentId: string, day: string) {
@@ -377,5 +388,99 @@ export function applyLiveQuoteStructure(
   }
   structure.orbBrokenUp = orbBrokenUp;
   structure.orbBrokenDown = orbBrokenDown;
+  return structure;
+}
+
+export type SessionOhlc = {
+  day: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+};
+
+/** Group chart candles into IST calendar sessions. */
+export function sessionsFromChartArrays(
+  timestamps: number[] | undefined,
+  opens: number[],
+  highs: number[],
+  lows: number[],
+  closes: number[],
+): SessionOhlc[] {
+  const n = Math.min(opens.length, highs.length, lows.length, closes.length);
+  if (n === 0) return [];
+
+  const byDay = new Map<string, SessionOhlc>();
+  for (let i = 0; i < n; i += 1) {
+    const ts = timestamps?.[i];
+    const day =
+      ts !== undefined && Number.isFinite(ts)
+        ? istParts(ts).day
+        : `seq:${i}`;
+    const existing = byDay.get(day);
+    if (!existing) {
+      byDay.set(day, {
+        day,
+        open: opens[i],
+        high: highs[i],
+        low: lows[i],
+        close: closes[i],
+      });
+      continue;
+    }
+    existing.high = Math.max(existing.high, highs[i]);
+    existing.low = Math.min(existing.low, lows[i]);
+    existing.close = closes[i];
+  }
+  return [...byDay.values()];
+}
+
+/** Most recent completed session strictly before `today` (YYYY-MM-DD). */
+export function priorSessionFromSessions(
+  sessions: SessionOhlc[],
+  today: string,
+): SessionOhlc | null {
+  const dated = sessions.filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s.day));
+  const earlier = dated.filter((s) => s.day < today);
+  if (earlier.length > 0) return earlier[earlier.length - 1];
+  if (sessions.length >= 2) return sessions[sessions.length - 2];
+  return null;
+}
+
+export function buildLiveDayStructure(input: {
+  day: string;
+  spot: number;
+  instrumentId: string;
+  maxPain: number | null;
+  putOiSupport: number | null;
+  callOiResistance: number | null;
+  quote?: { open: number; high: number; low: number; prevClose: number };
+  prior?: { high: number; low: number; close: number } | null;
+}): DayStructure {
+  const open = input.quote?.open ?? input.spot;
+  const priorClose =
+    input.prior?.close ?? input.quote?.prevClose ?? input.spot;
+  const priorHigh = input.prior?.high ?? priorClose * 1.01;
+  const priorLow = input.prior?.low ?? priorClose * 0.99;
+  const structure = buildDayStructure({
+    day: input.day,
+    spot: input.spot,
+    open,
+    priorHigh,
+    priorLow,
+    priorClose,
+    morningBars: [],
+    maxPain: input.maxPain,
+    putOiSupport: input.putOiSupport,
+    callOiResistance: input.callOiResistance,
+  });
+  if (input.quote) {
+    applyLiveQuoteStructure(
+      structure,
+      input.quote,
+      input.spot,
+      input.instrumentId,
+    );
+  }
   return structure;
 }

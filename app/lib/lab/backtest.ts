@@ -392,7 +392,7 @@ function runTradeDays(
 
     if (!picked) continue;
 
-    const defaults = positionDefaults(picked.strategy.id);
+    const defaults = positionDefaults(picked.strategy.id, ctx.expirySession);
     let targetSpot: number | undefined;
     let stopSpot: number | undefined;
     if (picked.strategy.id === "MAX_PAIN_REV" && structure.distToMaxPain !== null) {

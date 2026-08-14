@@ -2,6 +2,7 @@ import {
   DhanApiError,
   DhanConfigError,
   dhanPost,
+  dhanRateLimitedPost,
   getDhanCredentials,
   isDhanSandbox,
 } from "./config";
@@ -11,6 +12,11 @@ import {
   type IndexInstrument,
   type IndexQuote,
 } from "./instruments";
+import {
+  priorSessionFromSessions,
+  sessionsFromChartArrays,
+  todayIst,
+} from "../strategies/expiry-day";
 
 export {
   DhanApiError,
@@ -52,28 +58,33 @@ type ChartResponse = {
   remarks?: string;
 };
 
+export type PriorSessionStats = {
+  day: string;
+  high: number;
+  low: number;
+  close: number;
+};
+
+const priorCache = new Map<string, { asOf: string; value: PriorSessionStats }>();
+const chartSessionCache = new Map<
+  string,
+  { asOf: string; sessions: ReturnType<typeof sessionsFromChartArrays> }
+>();
+
 function formatDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
-function lastNumber(values: number[] | undefined) {
-  if (!values || values.length === 0) return undefined;
-  return values[values.length - 1];
-}
+async function fetchChartSessions(instrument: IndexInstrument) {
+  const today = todayIst();
+  const cached = chartSessionCache.get(instrument.id);
+  if (cached?.asOf === today) return cached.sessions;
 
-function firstNumber(values: number[] | undefined) {
-  if (!values || values.length === 0) return undefined;
-  return values[0];
-}
-
-async function fetchQuoteFromCharts(
-  instrument: IndexInstrument,
-): Promise<IndexQuote> {
   const to = new Date();
   const from = new Date(to);
-  from.setDate(from.getDate() - 7);
+  from.setDate(from.getDate() - 10);
 
-  const { status, payload } = await dhanPost<ChartResponse>(
+  const { status, payload } = await dhanRateLimitedPost<ChartResponse>(
     "/v2/charts/historical",
     {
       securityId: String(instrument.securityId),
@@ -83,6 +94,7 @@ async function fetchQuoteFromCharts(
       fromDate: formatDate(from),
       toDate: formatDate(to),
     },
+    "charts",
   );
 
   if (status >= 400) {
@@ -95,12 +107,30 @@ async function fetchQuoteFromCharts(
     );
   }
 
-  const closes = payload.close ?? [];
-  const opens = payload.open ?? [];
-  const highs = payload.high ?? [];
-  const lows = payload.low ?? [];
+  const sessions = sessionsFromChartArrays(
+    payload.timestamp,
+    payload.open ?? [],
+    payload.high ?? [],
+    payload.low ?? [],
+    payload.close ?? [],
+  );
+  if (sessions.length > 0) {
+    chartSessionCache.set(instrument.id, { asOf: today, sessions });
+  }
+  return sessions;
+}
 
-  const price = lastNumber(closes);
+async function fetchQuoteFromCharts(
+  instrument: IndexInstrument,
+): Promise<IndexQuote> {
+  const sessions = await fetchChartSessions(instrument);
+  const today = todayIst();
+  const latest =
+    sessions
+      .filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s.day) && s.day <= today)
+      .at(-1) ?? sessions.at(-1);
+  const prior = priorSessionFromSessions(sessions, today);
+  const price = latest?.close;
   if (price === undefined) {
     throw new DhanApiError(
       `No chart candles returned for ${instrument.name}`,
@@ -108,16 +138,37 @@ async function fetchQuoteFromCharts(
     );
   }
 
-  const prevClose =
-    closes.length > 1 ? closes[closes.length - 2] : (firstNumber(opens) ?? price);
-
   return buildQuote(instrument, {
     price,
-    open: firstNumber(opens) ?? price,
-    high: highs.length ? Math.max(...highs) : price,
-    low: lows.length ? Math.min(...lows) : price,
-    prevClose,
+    open: latest?.open ?? price,
+    high: latest?.high ?? price,
+    low: latest?.low ?? price,
+    prevClose: prior?.close ?? price,
   });
+}
+
+export async function fetchPriorSessionStats(
+  instrument: IndexInstrument,
+): Promise<PriorSessionStats | null> {
+  const today = todayIst();
+  const hit = priorCache.get(instrument.id);
+  if (hit?.asOf === today) return hit.value;
+
+  try {
+    const sessions = await fetchChartSessions(instrument);
+    const prior = priorSessionFromSessions(sessions, today);
+    if (!prior) return null;
+    const value = {
+      day: prior.day.startsWith("seq:") ? today : prior.day,
+      high: prior.high,
+      low: prior.low,
+      close: prior.close,
+    };
+    priorCache.set(instrument.id, { asOf: today, value });
+    return value;
+  } catch {
+    return null;
+  }
 }
 
 async function fetchQuotesFromMarketfeed(): Promise<IndexQuote[]> {

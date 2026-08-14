@@ -1,19 +1,18 @@
 import { getIndexByParam } from "../dhan/instruments";
 import { loadOptionChainPage } from "../dhan/option-chain";
-import { fetchIndexQuotes } from "../dhan/quotes";
+import { fetchIndexQuotes, fetchPriorSessionStats } from "../dhan/quotes";
 import {
   getStrategy,
   listStrategies,
   pickPlaybookPath,
-  positionDefaults,
 } from "../strategies/registry";
 import {
-  applyLiveQuoteStructure,
-  buildDayStructure,
+  buildLiveDayStructure,
   chainAroundAtm,
   computeMaxPain,
-  isExpiryCalendarDay,
   isIstTradingWeekday,
+  liveExpirySession,
+  normalizeExpiryDay,
   oiWalls,
   todayIst,
 } from "../strategies/expiry-day";
@@ -23,6 +22,7 @@ import {
   lotSizeFor,
   type Strategy,
 } from "../strategies/types";
+import { decidePaperExit } from "./paper-exit";
 import {
   closeTrade,
   getActiveRun,
@@ -40,7 +40,6 @@ import {
 } from "./paper-store";
 import {
   pnlLooksBroken,
-  positionFromTrade,
   settleTradePoints,
 } from "./paper-position";
 
@@ -52,10 +51,6 @@ function hourIst() {
       hour12: false,
     }).slice(0, 2),
   );
-}
-
-function isExpiryToday(instrumentId: string) {
-  return isExpiryCalendarDay(instrumentId, todayIst());
 }
 
 export function getPaperSnapshot() {
@@ -142,34 +137,21 @@ export async function syncPaper(run?: PaperRun): Promise<{
   let opened: PaperTrade | null = null;
 
   if (open) {
-    const defaults = positionDefaults(open.strategy_id);
-    const position = {
-      ...positionFromTrade(open),
-      ...defaults,
-    };
     const pnlPoints = settleTradePoints(open, chain.spot, chain.rows);
-    const isDebit = open.credit < 0;
-    const risk = Math.abs(open.credit) || 1;
-    const stopLevel = isDebit
-      ? -risk * (defaults.stopMult ?? 0.35)
-      : -risk * (defaults.stopMult ?? 2);
-    const hitStop = pnlPoints <= stopLevel;
-    const flatBy =
-      defaults.flatByHour !== undefined && hour >= defaults.flatByHour;
-    const timedOut =
-      defaults.timeStopHours !== undefined &&
-      position.entryHour !== undefined &&
-      hour >= position.entryHour + defaults.timeStopHours;
-    const expired =
-      today > open.expiry_at ||
-      (today === open.expiry_at && hour >= FLAT_BY_HOUR);
-
-    if (hitStop || flatBy || timedOut || expired) {
-      const exitPnl = hitStop ? stopLevel : pnlPoints;
+    const decision = decidePaperExit({
+      strategyId: open.strategy_id,
+      hour,
+      today,
+      expiryAt: open.expiry_at,
+      credit: open.credit,
+      pnlPoints,
+      entryHour: open.entry_hour,
+    });
+    if (decision) {
       closeTrade(open.id, {
         spotExit: chain.spot,
-        pnlPoints: exitPnl,
-        pnlInr: exitPnl * lotSizeFor(instrument.id),
+        pnlPoints: decision.pnlPoints,
+        pnlInr: decision.pnlPoints * lotSizeFor(instrument.id),
       });
       closed = listTradesForRun(active.id).find((t) => t.id === open.id) ?? null;
     }
@@ -208,25 +190,26 @@ export async function syncPaper(run?: PaperRun): Promise<{
       quote = undefined;
     }
 
+    let prior: { high: number; low: number; close: number } | null = null;
+    try {
+      prior = await fetchPriorSessionStats(instrument);
+    } catch {
+      prior = null;
+    }
+
     const subset = chainAroundAtm(chain.rows, chain.spot, 10);
     const maxPain = computeMaxPain(subset);
     const walls = oiWalls(subset);
-    const openPx = quote?.open ?? chain.spot;
-    const structure = buildDayStructure({
+    const structure = buildLiveDayStructure({
       day: today,
       spot: chain.spot,
-      open: openPx,
-      priorHigh: quote?.high ?? chain.spot * 1.005,
-      priorLow: quote?.low ?? chain.spot * 0.995,
-      priorClose: quote?.prevClose ?? chain.spot,
-      morningBars: [],
+      instrumentId: instrument.id,
       maxPain,
       putOiSupport: walls.putSupport,
       callOiResistance: walls.callResist,
+      quote,
+      prior,
     });
-    if (quote) {
-      applyLiveQuoteStructure(structure, quote, chain.spot, instrument.id);
-    }
 
     const ctx = {
       instrument,
@@ -235,7 +218,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
       hour,
       structure,
       rows: subset,
-      expirySession: isExpiryToday(instrument.id),
+      expirySession: liveExpirySession(instrument.id, chain.expiry),
     };
 
     const picked =
@@ -262,7 +245,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
         width: picked.proposal.width,
         spot_entry: chain.spot,
         entry_at: today,
-        expiry_at: today,
+        expiry_at: normalizeExpiryDay(chain.expiry) || today,
         legs: picked.proposal.legs,
         entry_hour: hour,
       });

@@ -11,6 +11,7 @@ import {
   DhanApiError,
   DhanConfigError,
   fetchIndexQuotes,
+  fetchPriorSessionStats,
 } from "../lib/dhan/quotes";
 import { buildCreditSpreads, type CreditSpread } from "../lib/dhan/strategies";
 import {
@@ -73,6 +74,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     } catch {
       quote = undefined;
     }
+    let prior: { high: number; low: number; close: number } | null = null;
+    try {
+      prior = await fetchPriorSessionStats(instrument);
+    } catch {
+      prior = null;
+    }
     spreads = buildCreditSpreads(
       chain.rows,
       chain.spot,
@@ -80,6 +87,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       quote,
       instrument,
       chain.expiry,
+      prior,
     );
     expiry = chain.expiry;
     spot = chain.spot;

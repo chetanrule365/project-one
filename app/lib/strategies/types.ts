@@ -119,8 +119,14 @@ export const STOP_LOSS_DEBIT_FRAC = 0.35;
 /** Take profit fraction of max profit for premium sells */
 export const TAKE_PROFIT_FRAC = 0.6;
 
-/** Force flat premium sells from this IST hour */
+/** Force flat premium sells on expiry from this IST hour */
 export const FLAT_BY_HOUR = 14;
+
+/** Non-expiry credit trades flatten from this IST hour (hold through the afternoon) */
+export const DAILY_FLAT_BY_HOUR = 15;
+
+/** Paper worker keeps managing open trades while IST hour < this */
+export const SESSION_MANAGE_UNTIL_HOUR = 16;
 
 /** Opening-range proxy: first N hourly bars */
 export const ORB_HOURS = 1;
