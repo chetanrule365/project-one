@@ -1,6 +1,5 @@
 import { listAllTradesWithInstrument, type PaperTradeExportRow } from "./paper-store";
 import { formatIstTimestamp, formatPaperLegs } from "./paper-position";
-import { buildXlsxWorkbook } from "./xlsx-workbook";
 
 const HEADERS = [
   "Trade ID",
@@ -29,7 +28,16 @@ const HEADERS = [
 
 export function paperTradesExportFilename(day = new Date()) {
   const stamp = day.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-  return `paper-trades-${stamp}.xlsx`;
+  return `paper-trades-${stamp}.csv`;
+}
+
+function csvField(value: string | number | null | undefined) {
+  if (value == null) return "";
+  const text = String(value);
+  if (/[",\r\n]/.test(text)) {
+    return `"${text.replaceAll('"', '""')}"`;
+  }
+  return text;
 }
 
 function tradeRow(trade: PaperTradeExportRow) {
@@ -60,13 +68,10 @@ function tradeRow(trade: PaperTradeExportRow) {
   ];
 }
 
-/** Real Office Open XML .xlsx workbook. */
-export function buildPaperTradesWorkbook(
+/** UTF-8 CSV of all paper trades. */
+export function buildPaperTradesCsv(
   trades: PaperTradeExportRow[] = listAllTradesWithInstrument(),
 ) {
-  return buildXlsxWorkbook(
-    "Paper trades",
-    [[...HEADERS], ...trades.map(tradeRow)],
-    { defaultColWidth: 14, dateColIndexes: [6, 17, 18, 19] },
-  );
+  const rows = [[...HEADERS], ...trades.map(tradeRow)];
+  return rows.map((row) => row.map(csvField).join(",")).join("\r\n") + "\r\n";
 }

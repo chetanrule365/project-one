@@ -290,11 +290,11 @@ export default function StrategiesPage({
             </div>
             {paper.trades.length > 0 ? (
               <a
-                href="/api/paper-trades.xlsx"
+                href="/api/paper-trades.csv"
                 download
                 className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900"
               >
-                Download Excel
+                Download CSV
               </a>
             ) : null}
           </div>
