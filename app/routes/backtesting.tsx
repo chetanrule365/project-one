@@ -12,7 +12,7 @@ export function meta({}: Route.MetaArgs) {
     { title: "Backtesting" },
     {
       name: "description",
-      content: "Expiry-day playbook historical backtests",
+      content: "Weekday playbook historical backtests",
     },
   ];
 }
@@ -196,10 +196,10 @@ export default function BacktestingPage({
             Backtesting
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
-            Historical expiry-day playbook. Auto path: Iron Condor → OI fade →
-            Max Pain → ORB (or sit out). ORB is last, needs a clean break, and
-            skips rich ATM premium. Hourly bars, not a true 15m opening range.
-            No real orders.
+            Historical weekday playbook. Expiry auto path: Iron Condor → OI fade
+            → Max Pain → ORB. Other days: ORB debit spread → OI fade → Iron
+            Condor (max pain sits out). Hourly bars, not a true 15m opening
+            range. No real orders.
           </p>
         </header>
 
@@ -242,7 +242,7 @@ export default function BacktestingPage({
                 defaultValue="AUTO"
                 className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
               >
-                <option value="AUTO">Auto (one path / expiry)</option>
+                <option value="AUTO">Auto (one path / session)</option>
                 {loaderData.strategies.map((strategy) => (
                   <option key={strategy.id} value={strategy.id}>
                     {strategy.name} only

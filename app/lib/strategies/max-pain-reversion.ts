@@ -8,7 +8,7 @@ import {
   strikeAt,
   strikeKey,
 } from "./common";
-import { inMaxPainBand, maxExpiryDebitPts } from "./expiry-day";
+import { inMaxPainBand, isExpirySessionCtx, maxExpiryDebitPts } from "./expiry-day";
 import {
   FLAT_BY_HOUR,
   STOP_LOSS_DEBIT_FRAC,
@@ -25,11 +25,12 @@ export const maxPainStrategy = assertStrategy({
   name: "Max Pain Reversion",
   bias: "Mean reversion",
   description:
-    "When spot is 80–200 pts from max pain on a non-breakout Tuesday, buy ATM toward max pain.",
+    "Expiry only: when spot is 80–200 pts from max pain on a non-breakout session, buy ATM toward the pin.",
   requiredStrikeKeys() {
     return [strikeKey(0)];
   },
   isEligible(ctx) {
+    if (!isExpirySessionCtx(ctx)) return false;
     if (ctx.hour < 10 || ctx.hour >= FLAT_BY_HOUR) return false;
     if (ctx.structure.orbBrokenUp || ctx.structure.orbBrokenDown) return false;
     return inMaxPainBand(ctx.structure.distToMaxPain);

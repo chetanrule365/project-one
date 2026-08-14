@@ -79,6 +79,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       widthSteps,
       quote,
       instrument,
+      chain.expiry,
     );
     expiry = chain.expiry;
     spot = chain.spot;
@@ -189,7 +190,7 @@ export default function StrategiesPage({
             Strategies
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
-            Live expiry-day playbook and multi-index paper trading. No real
+            Live weekday playbook and multi-index paper trading. No real
             orders.
           </p>
         </header>
@@ -210,7 +211,7 @@ export default function StrategiesPage({
           <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-base font-semibold text-slate-900 dark:text-white">
-                Expiry-day playbook
+                Weekday playbook
               </h2>
               <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                 {playbook.instrument.name}
@@ -219,7 +220,7 @@ export default function StrategiesPage({
                   : ""}
                 {playbook.expiry ? ` · ${playbook.expiry}` : ""}
                 <span className="text-slate-400"> · </span>
-                Go = eligible · Sit = skip
+                Go = eligible · Sit = skip · expiry path vs daily path
               </p>
             </div>
             <form method="get" className="flex flex-wrap items-center gap-2">

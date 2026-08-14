@@ -1,7 +1,7 @@
 import { getOpenTrade, listActiveRuns, type PaperRun } from "./paper-store";
 import { repairStoredPaperPnls, syncPaper } from "./paper";
 import { FLAT_BY_HOUR } from "../strategies/types";
-import { expiryWeekday, istWeekday } from "../strategies/expiry-day";
+import { isIstTradingWeekday, todayIst } from "../strategies/expiry-day";
 
 /** Active market-window poll (IST). */
 const ACTIVE_SYNC_MS = 60_000;
@@ -35,10 +35,6 @@ function state(): WorkerState {
   return globalForWorker.__paperWorker;
 }
 
-function todayIst() {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-}
-
 function hourIst() {
   return Number(
     new Date().toLocaleTimeString("en-GB", {
@@ -54,9 +50,8 @@ function shouldSyncNow(active: PaperRun) {
   if (open) return true;
 
   const hour = hourIst();
-  const expiryToday =
-    istWeekday(todayIst()) === expiryWeekday(active.instrument_id);
-  if (expiryToday && hour >= 9 && hour < FLAT_BY_HOUR) return true;
+  if (!isIstTradingWeekday(todayIst())) return false;
+  if (hour >= 9 && hour < FLAT_BY_HOUR) return true;
   return false;
 }
 
@@ -88,7 +83,7 @@ async function tick() {
     }
     const due = runs.filter(shouldSyncNow);
     if (due.length === 0) {
-      s.lastMessage = `Idle — ${runs.length} run(s) waiting for expiry window or open trade`;
+      s.lastMessage = `Idle — ${runs.length} run(s) waiting for market window or open trade`;
       return;
     }
 

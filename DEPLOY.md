@@ -39,7 +39,7 @@ A small always-on Node service + tiny volume usually stays near Hobby. The Free 
 ## Verify
 
 - App loads in the browser
-- Railway **Deploy Logs** show `[paper-worker] started` and later sync messages on expiry mornings
+- Railway **Deploy Logs** show `[paper-worker] started` and later sync messages on weekday mornings (10:00–14:00 IST)
 - Close the browser; leave the Railway service running — paper sync continues
 - Redeploy once and confirm active paper run / trade history still exists
 

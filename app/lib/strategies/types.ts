@@ -85,8 +85,13 @@ export type EntryContext = {
   /** Premiums keyed "ATM:CE" etc. at decision bar */
   premiums?: Record<string, number>;
   strikes?: Record<string, number>;
-  /** Hourly bars for the expiry day keyed by series */
+  /** Hourly bars for the session keyed by series */
   hourlyByKey?: Record<string, Array<{ hour: number; bar: RollingBar }>>;
+  /**
+   * True when this session is the contract's expiry (weekly weekday / holiday shift).
+   * Undefined is treated as expiry for backward-compatible tests.
+   */
+  expirySession?: boolean;
 };
 
 export type Strategy = {
@@ -146,6 +151,13 @@ export const MAX_EXPIRY_DEBIT_PTS: Record<string, number> = {
   NIFTY: 70,
   BANKNIFTY: 140,
   SENSEX: 90,
+};
+
+/** Cap on non-expiry ORB debit-spread cost (long ATM, short further OTM). */
+export const MAX_DAILY_DEBIT_PTS: Record<string, number> = {
+  NIFTY: 80,
+  BANKNIFTY: 160,
+  SENSEX: 120,
 };
 
 /** Max-pain distance band (pts) */

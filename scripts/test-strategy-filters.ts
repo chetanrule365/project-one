@@ -1,7 +1,12 @@
 import { INDEX_INSTRUMENTS } from "../app/lib/dhan/instruments";
-import { applyLiveQuoteStructure, orbFightsMaxPain } from "../app/lib/strategies/expiry-day";
+import {
+  applyLiveQuoteStructure,
+  isIstTradingWeekday,
+  orbFightsMaxPain,
+} from "../app/lib/strategies/expiry-day";
+import { maxPainStrategy } from "../app/lib/strategies/max-pain-reversion";
 import { orbAtmStrategy } from "../app/lib/strategies/orb-atm";
-import { pickExpiryPath } from "../app/lib/strategies/registry";
+import { pickPlaybookPath } from "../app/lib/strategies/registry";
 import type { DayStructure, EntryContext } from "../app/lib/strategies/types";
 
 const sensex = INDEX_INSTRUMENTS.find((i) => i.id === "SENSEX")!;
@@ -37,6 +42,7 @@ function ctx(partial: Partial<EntryContext> = {}): EntryContext {
     structure: structure({}),
     premiums: { "ATM:PE": 127.9, "ATM:CE": 80 },
     strikes: { ATM: 77800 },
+    expirySession: true,
     ...partial,
   };
 }
@@ -47,6 +53,19 @@ const todayLike = applyLiveQuoteStructure(
   77815,
   "SENSEX",
 );
+
+const dailyOrb = ctx({
+  expirySession: false,
+  premiums: {
+    "ATM:PE": 180,
+    "ATM:CE": 90,
+    "ATM-2:PE": 95,
+    "ATM+2:CE": 40,
+  },
+  strikes: { ATM: 77800, "ATM-2": 77600, "ATM+2": 78000 },
+});
+
+const dailyOrbProposal = orbAtmStrategy.proposeEntry(dailyOrb);
 
 const checks = [
   !orbAtmStrategy.isEligible(ctx({ structure: structure({ quietDay: true }) })),
@@ -59,7 +78,7 @@ const checks = [
   orbAtmStrategy.proposeEntry(ctx()) === null,
   todayLike.orbBrokenDown === false,
   orbFightsMaxPain(structure({ distToMaxPain: -185 }), "down") === true,
-  pickExpiryPath(
+  pickPlaybookPath(
     ctx({
       structure: structure({
         orbBrokenDown: true,
@@ -68,12 +87,21 @@ const checks = [
     }),
     ["ORB_ATM"],
   ) === null,
+  !maxPainStrategy.isEligible(ctx({ expirySession: false })),
+  orbAtmStrategy.isEligible(dailyOrb) === true,
+  dailyOrbProposal !== null,
+  dailyOrbProposal?.legs.length === 2,
+  (dailyOrbProposal?.maxLoss ?? 0) < 180,
+  pickPlaybookPath(dailyOrb)?.strategy.id === "ORB_ATM",
+  isIstTradingWeekday("2026-08-14") === true,
+  isIstTradingWeekday("2026-08-15") === false,
 ];
 
 if (checks.some((ok) => !ok)) {
   console.error("strategy-filters failed", checks, {
     todayLike,
     proposal: orbAtmStrategy.proposeEntry(ctx()),
+    dailyOrbProposal,
   });
   process.exit(1);
 }
