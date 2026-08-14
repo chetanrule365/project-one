@@ -13,6 +13,8 @@ import {
   buildDayStructure,
   chainAroundAtm,
   computeMaxPain,
+  isExpirySessionCtx,
+  liveExpirySession,
   oiWalls,
 } from "./expiry-day";
 
@@ -46,10 +48,31 @@ export function positionDefaults(strategyId: string): Partial<OpenPosition> {
   }
 }
 
+const EXPIRY_ORDER = ["IRON_CONDOR", "OI_RANGE_FADE", "MAX_PAIN_REV", "ORB_ATM"];
+const DAILY_ORDER = ["ORB_ATM", "OI_RANGE_FADE", "IRON_CONDOR", "MAX_PAIN_REV"];
+
+function pickReason(id: string, ctx: EntryContext) {
+  if (id === "ORB_ATM") {
+    const dir = ctx.structure.orbBrokenUp ? "up" : "down";
+    return isExpirySessionCtx(ctx)
+      ? `ORB ${dir} → ATM buy`
+      : `ORB ${dir} → debit spread`;
+  }
+  if (id === "IRON_CONDOR") {
+    return isExpirySessionCtx(ctx)
+      ? "Quiet range expiry → Iron Condor"
+      : "Quiet range day → Iron Condor";
+  }
+  if (id === "MAX_PAIN_REV") {
+    return `Max pain ${ctx.structure.maxPain} (${Math.round(ctx.structure.distToMaxPain ?? 0)} pts) → reversion`;
+  }
+  return "Near OI wall → range fade";
+}
+
 /**
- * Auto picker: sell premium first on expiry, ORB last and only if still clean.
+ * Auto picker: expiry sells premium first; other weekdays prefer ORB then fades.
  */
-export function pickExpiryPath(
+export function pickPlaybookPath(
   ctx: EntryContext,
   strategyIds?: string[],
 ): { strategy: Strategy; proposal: TradeProposal; reason: string } | null {
@@ -57,24 +80,24 @@ export function pickExpiryPath(
     ? STRATEGIES.filter((s) => strategyIds.includes(s.id))
     : STRATEGIES;
 
-  const order = ["IRON_CONDOR", "OI_RANGE_FADE", "MAX_PAIN_REV", "ORB_ATM"];
+  const order = isExpirySessionCtx(ctx) ? EXPIRY_ORDER : DAILY_ORDER;
   for (const id of order) {
     const strategy = allowed.find((s) => s.id === id);
     if (!strategy) continue;
     if (!strategy.isEligible(ctx)) continue;
     const proposal = strategy.proposeEntry(ctx);
     if (!proposal) continue;
-    const reason =
-      id === "ORB_ATM"
-        ? `ORB ${ctx.structure.orbBrokenUp ? "up" : "down"} → ATM buy`
-        : id === "IRON_CONDOR"
-          ? "Quiet range expiry → Iron Condor"
-          : id === "MAX_PAIN_REV"
-            ? `Max pain ${ctx.structure.maxPain} (${Math.round(ctx.structure.distToMaxPain ?? 0)} pts) → reversion`
-            : "Near OI wall → range fade";
-    return { strategy, proposal, reason };
+    return { strategy, proposal, reason: pickReason(id, ctx) };
   }
   return null;
+}
+
+/** @deprecated use pickPlaybookPath */
+export function pickExpiryPath(
+  ctx: EntryContext,
+  strategyIds?: string[],
+) {
+  return pickPlaybookPath(ctx, strategyIds);
 }
 
 /** Live chain playbook cards. */
@@ -84,6 +107,7 @@ export function buildPlaybookCards(
   widthSteps = 2,
   quote?: { open: number; high: number; low: number; prevClose: number },
   instrument: IndexInstrument = INDEX_INSTRUMENTS[0],
+  expiry?: string,
 ) {
   const subset = chainAroundAtm(rows, spot, 10);
   const maxPain = computeMaxPain(subset);
@@ -121,6 +145,7 @@ export function buildPlaybookCards(
       hour,
       structure,
       rows: subset,
+      expirySession: liveExpirySession(instrument.id, expiry),
     };
     const eligible = strategy.isEligible(ctx);
     const proposal = eligible ? strategy.proposeEntry(ctx) : null;

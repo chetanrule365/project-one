@@ -6,14 +6,14 @@ import {
 import {
   getStrategy,
   listStrategies,
-  pickExpiryPath,
+  pickPlaybookPath,
   positionDefaults,
 } from "../strategies/registry";
 import {
   atmBandKeys,
   buildDayStructure,
   hoursOnDay,
-  listExpiryDays,
+  isExpirySession,
   maxPainFromSnapshot,
   oiWallsFromSnapshot,
 } from "../strategies/expiry-day";
@@ -313,7 +313,7 @@ function manageIntraday(input: {
   };
 }
 
-function runExpiryDay(
+function runTradeDays(
   strategies: Strategy[],
   instrument: IndexInstrument,
   series: Record<string, RollingBar[]>,
@@ -325,19 +325,8 @@ function runExpiryDay(
   const trades: BacktestTrade[] = [];
   const strikeKeys = atmBandKeys(4);
   const atmSeries = series["ATM:CE"] ?? series["ATM:PE"] ?? [];
-  const expiryDays = listExpiryDays(instrument.id, days);
 
-  // BankNifty: only monthly last Tuesday
-  const tradeDays =
-    instrument.id === "BANKNIFTY"
-      ? expiryDays.filter((d) => {
-          const [y, m] = d.split("-").map(Number);
-          const nextWeek = new Date(Date.UTC(y, m - 1, Number(d.slice(8)) + 7));
-          return nextWeek.getUTCMonth() !== m - 1;
-        })
-      : expiryDays;
-
-  for (const day of tradeDays) {
+  for (const day of days) {
     const prior = previousDay(days, day);
     const priorStats = prior ? priorDayStats(atmSeries, prior) : null;
     const dayHours = hoursOnDay(atmSeries, day);
@@ -376,6 +365,7 @@ function runExpiryDay(
       structure,
       premiums: snap.premiums,
       strikes: snap.strikes,
+      expirySession: isExpirySession(instrument.id, day, days),
     };
 
     let picked: {
@@ -385,7 +375,7 @@ function runExpiryDay(
     } | null = null;
 
     if (mode === "auto") {
-      picked = pickExpiryPath(ctx, strategies.map((s) => s.id));
+      picked = pickPlaybookPath(ctx, strategies.map((s) => s.id));
     } else {
       const strategy = strategies[0];
       if (strategy?.isEligible(ctx)) {
@@ -503,7 +493,7 @@ export async function runBacktest(input: {
   );
 
   const days = uniqueDays(series);
-  const trades = runExpiryDay(
+  const trades = runTradeDays(
     strategies,
     input.instrument,
     series,
@@ -525,7 +515,7 @@ export async function runBacktest(input: {
   };
 }
 
-/** @deprecated — weekly picker removed; use pickExpiryPath */
+/** @deprecated — weekly picker removed; use pickPlaybookPath */
 export function pickOneStrategy() {
   return null;
 }

@@ -2,6 +2,7 @@ import type { OptionChainRow } from "../dhan/option-chain";
 import type { RollingBar } from "../dhan/rolling-options";
 import {
   LIVE_QUIET_RANGE_PCT,
+  MAX_DAILY_DEBIT_PTS,
   MAX_EXPIRY_DEBIT_PTS,
   MAX_PAIN_MAX_DIST,
   MAX_PAIN_MIN_DIST,
@@ -10,6 +11,7 @@ import {
   ORB_MIN_BREAK_PTS,
   QUIET_PRIOR_RANGE_PCT,
   type DayStructure,
+  type EntryContext,
 } from "./types";
 import { atmIndex, strikeKey } from "./common";
 
@@ -38,6 +40,44 @@ export function istWeekday(day: string) {
 export function expiryWeekday(instrumentId: string) {
   if (instrumentId === "SENSEX") return 4; // Thursday
   return 2; // Tuesday — Nifty & BankNifty
+}
+
+export function todayIst() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+}
+
+/** Mon–Fri in IST. Holidays are not in the calendar; callers sit out if the chain is dead. */
+export function isIstTradingWeekday(day: string) {
+  const weekday = istWeekday(day);
+  return weekday >= 1 && weekday <= 5;
+}
+
+/** Dhan expiry list items are typically YYYY-MM-DD. */
+export function expiryEqualsDay(expiry: string, day: string) {
+  const trimmed = expiry.trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10) === day;
+  const swapped = trimmed.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (swapped) return `${swapped[3]}-${swapped[2]}-${swapped[1]}` === day;
+  return false;
+}
+
+export function isExpiryCalendarDay(instrumentId: string, day: string) {
+  return istWeekday(day) === expiryWeekday(instrumentId);
+}
+
+/** Live playbook: true only if the selected chain expires today. */
+export function liveExpirySession(instrumentId: string, expiry?: string) {
+  const today = todayIst();
+  if (expiry && /^\d{4}-\d{2}-\d{2}/.test(expiry.trim())) {
+    return expiryEqualsDay(expiry, today);
+  }
+  if (expiry && expiryEqualsDay(expiry, today)) return true;
+  return isExpiryCalendarDay(instrumentId, today);
+}
+
+/** Undefined expirySession means expiry (legacy tests / callers). */
+export function isExpirySessionCtx(ctx: Pick<EntryContext, "expirySession">) {
+  return ctx.expirySession !== false;
 }
 
 /** True if `day` is an expiry session (or holiday-shifted previous day). */
@@ -291,6 +331,16 @@ export function orbBreakBufferPts(instrumentId: string, spot: number) {
 
 export function maxExpiryDebitPts(instrumentId: string) {
   return MAX_EXPIRY_DEBIT_PTS[instrumentId] ?? 70;
+}
+
+export function maxDailyDebitPts(instrumentId: string) {
+  return MAX_DAILY_DEBIT_PTS[instrumentId] ?? 80;
+}
+
+export function maxDebitPts(instrumentId: string, expirySession: boolean) {
+  return expirySession
+    ? maxExpiryDebitPts(instrumentId)
+    : maxDailyDebitPts(instrumentId);
 }
 
 /** True when a directional buy would fight expiry pin toward max pain. */

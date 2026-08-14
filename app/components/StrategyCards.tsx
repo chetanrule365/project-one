@@ -88,10 +88,10 @@ export function StrategyCards({
         <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h2 className="text-base font-semibold text-slate-900 dark:text-white">
-              Expiry-day playbook
+              Weekday playbook
             </h2>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              Best on expiry day 10:00–14:00 IST
+              10:00–14:00 IST · expiry sells premium first; other days prefer ORB
             </p>
           </div>
 

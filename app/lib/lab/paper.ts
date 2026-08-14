@@ -4,7 +4,7 @@ import { fetchIndexQuotes } from "../dhan/quotes";
 import {
   getStrategy,
   listStrategies,
-  pickExpiryPath,
+  pickPlaybookPath,
   positionDefaults,
 } from "../strategies/registry";
 import {
@@ -12,9 +12,10 @@ import {
   buildDayStructure,
   chainAroundAtm,
   computeMaxPain,
-  expiryWeekday,
-  istWeekday,
+  isExpiryCalendarDay,
+  isIstTradingWeekday,
   oiWalls,
+  todayIst,
 } from "../strategies/expiry-day";
 import {
   DEFAULT_WIDTH_STEPS,
@@ -43,10 +44,6 @@ import {
   settleTradePoints,
 } from "./paper-position";
 
-function todayIst() {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-}
-
 function hourIst() {
   return Number(
     new Date().toLocaleTimeString("en-GB", {
@@ -58,7 +55,7 @@ function hourIst() {
 }
 
 function isExpiryToday(instrumentId: string) {
-  return istWeekday(todayIst()) === expiryWeekday(instrumentId);
+  return isExpiryCalendarDay(instrumentId, todayIst());
 }
 
 export function getPaperSnapshot() {
@@ -180,14 +177,14 @@ export async function syncPaper(run?: PaperRun): Promise<{
 
   const stillOpen = getOpenTrade(active.id);
   if (!stillOpen) {
-    if (!isExpiryToday(instrument.id)) {
+    if (!isIstTradingWeekday(today)) {
       return {
         run: active,
         opened: null,
         closed,
         message: closed
-          ? "Closed paper trade. Not expiry day — no new entry."
-          : "Not Nifty/index expiry day (Tuesday for Nifty) — sitting out.",
+          ? "Closed paper trade. Weekend — no new entry."
+          : "Weekend — sitting out.",
       };
     }
     if (hour < 10 || hour >= FLAT_BY_HOUR) {
@@ -238,11 +235,12 @@ export async function syncPaper(run?: PaperRun): Promise<{
       hour,
       structure,
       rows: subset,
+      expirySession: isExpiryToday(instrument.id),
     };
 
     const picked =
       active.strategy_id === "AUTO" || active.strategy_id === "BOTH"
-        ? pickExpiryPath(ctx)
+        ? pickPlaybookPath(ctx)
         : (() => {
             const strategy = strategies[0];
             if (!strategy?.isEligible(ctx)) return null;

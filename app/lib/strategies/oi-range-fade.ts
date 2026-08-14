@@ -27,7 +27,7 @@ export const oiRangeFadeStrategy = assertStrategy({
   name: "OI Range Fade",
   bias: "Fade OI walls",
   description:
-    "Near put-OI support → bull put; near call-OI resistance → bear call. Defined-risk credit.",
+    "Any session: near put-OI support → bull put; near call-OI resistance → bear call. Defined-risk credit.",
   requiredStrikeKeys(widthSteps) {
     const w = Math.max(1, widthSteps);
     return [strikeKey(-1), strikeKey(-1 - w), strikeKey(1), strikeKey(1 + w)];
