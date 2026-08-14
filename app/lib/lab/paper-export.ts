@@ -33,6 +33,9 @@ export function paperTradesExportFilename(day = new Date()) {
 
 function csvField(value: string | number | null | undefined) {
   if (value == null) return "";
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(Math.round(value * 100) / 100);
+  }
   const text = String(value);
   if (/[",\r\n]/.test(text)) {
     return `"${text.replaceAll('"', '""')}"`;

@@ -99,7 +99,10 @@ export function positionFromTrade(trade: PaperTrade): OpenPosition {
     entryAt: trade.entry_at,
     expiryAt: trade.expiry_at,
     entryHour: trade.entry_hour ?? undefined,
-    ...positionDefaults(trade.strategy_id),
+    ...positionDefaults(
+      trade.strategy_id,
+      trade.expiry_at === trade.entry_at,
+    ),
   };
 }
 

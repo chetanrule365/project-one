@@ -2,6 +2,7 @@ import { ironCondorStrategy, IC_DEFAULTS } from "./iron-condor";
 import { orbAtmStrategy, ORB_DEFAULTS } from "./orb-atm";
 import { maxPainStrategy, maxPainTargets, MAX_PAIN_DEFAULTS } from "./max-pain-reversion";
 import { oiRangeFadeStrategy, OI_FADE_DEFAULTS } from "./oi-range-fade";
+import { DAILY_FLAT_BY_HOUR } from "./types";
 import type { EntryContext, OpenPosition, Strategy, TradeProposal } from "./types";
 import type { OptionChainRow } from "../dhan/option-chain";
 import {
@@ -9,8 +10,7 @@ import {
   type IndexInstrument,
 } from "../dhan/instruments";
 import {
-  applyLiveQuoteStructure,
-  buildDayStructure,
+  buildLiveDayStructure,
   chainAroundAtm,
   computeMaxPain,
   isExpirySessionCtx,
@@ -33,16 +33,23 @@ export function getStrategy(id: string) {
   return STRATEGIES.find((s) => s.id === id);
 }
 
-export function positionDefaults(strategyId: string): Partial<OpenPosition> {
+export function positionDefaults(
+  strategyId: string,
+  expirySession = false,
+): Partial<OpenPosition> {
   switch (strategyId) {
     case "ORB_ATM":
       return ORB_DEFAULTS;
     case "IRON_CONDOR":
-      return IC_DEFAULTS;
+      return expirySession
+        ? IC_DEFAULTS
+        : { ...IC_DEFAULTS, flatByHour: DAILY_FLAT_BY_HOUR };
     case "MAX_PAIN_REV":
       return MAX_PAIN_DEFAULTS;
     case "OI_RANGE_FADE":
-      return OI_FADE_DEFAULTS;
+      return expirySession
+        ? OI_FADE_DEFAULTS
+        : { ...OI_FADE_DEFAULTS, flatByHour: DAILY_FLAT_BY_HOUR };
     default:
       return {};
   }
@@ -108,26 +115,21 @@ export function buildPlaybookCards(
   quote?: { open: number; high: number; low: number; prevClose: number },
   instrument: IndexInstrument = INDEX_INSTRUMENTS[0],
   expiry?: string,
+  prior?: { high: number; low: number; close: number } | null,
 ) {
   const subset = chainAroundAtm(rows, spot, 10);
   const maxPain = computeMaxPain(subset);
   const walls = oiWalls(subset);
-  const open = quote?.open ?? spot;
-  const structure = buildDayStructure({
+  const structure = buildLiveDayStructure({
     day: new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }),
     spot,
-    open,
-    priorHigh: quote?.high ?? spot * 1.005,
-    priorLow: quote?.low ?? spot * 0.995,
-    priorClose: quote?.prevClose ?? spot,
-    morningBars: [],
+    instrumentId: instrument.id,
     maxPain,
     putOiSupport: walls.putSupport,
     callOiResistance: walls.callResist,
+    quote,
+    prior,
   });
-  if (quote) {
-    applyLiveQuoteStructure(structure, quote, spot, instrument.id);
-  }
 
   const hour = Number(
     new Date().toLocaleTimeString("en-GB", {
@@ -186,8 +188,18 @@ export function buildCreditSpreads(
   widthSteps = 2,
   quote?: { open: number; high: number; low: number; prevClose: number },
   instrument?: IndexInstrument,
+  expiry?: string,
+  prior?: { high: number; low: number; close: number } | null,
 ) {
-  return buildPlaybookCards(rows, spot, widthSteps, quote, instrument);
+  return buildPlaybookCards(
+    rows,
+    spot,
+    widthSteps,
+    quote,
+    instrument,
+    expiry,
+    prior,
+  );
 }
 
 export type { TradeProposal as CreditSpreadProposal, Strategy };

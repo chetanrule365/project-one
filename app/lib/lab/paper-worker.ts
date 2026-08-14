@@ -1,6 +1,6 @@
 import { getOpenTrade, listActiveRuns, type PaperRun } from "./paper-store";
 import { repairStoredPaperPnls, syncPaper } from "./paper";
-import { FLAT_BY_HOUR } from "../strategies/types";
+import { SESSION_MANAGE_UNTIL_HOUR } from "../strategies/types";
 import { isIstTradingWeekday, todayIst } from "../strategies/expiry-day";
 
 /** Active market-window poll (IST). */
@@ -51,7 +51,7 @@ function shouldSyncNow(active: PaperRun) {
 
   const hour = hourIst();
   if (!isIstTradingWeekday(todayIst())) return false;
-  if (hour >= 9 && hour < FLAT_BY_HOUR) return true;
+  if (hour >= 9 && hour < SESSION_MANAGE_UNTIL_HOUR) return true;
   return false;
 }
 

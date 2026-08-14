@@ -21,14 +21,14 @@ import {
 /**
  * Iron Condor — quiet range after morning range forms (~10:00).
  * Short ATM±2, long wings widthSteps further (default 2 ≈ 100 pts).
- * Day-trade: flatten by 14:00 IST on expiry and non-expiry sessions.
+ * Expiry: flatten by 14:00 IST. Other weekdays: hold to 15:00 unless stop / 60% TP.
  */
 export const ironCondorStrategy = assertStrategy({
   id: "IRON_CONDOR",
   name: "Iron Condor",
   bias: "Range / theta",
   description:
-    "Sell ATM±2 call & put, buy further OTM wings. Quiet day after morning range; flatten by 14:00.",
+    "Sell ATM±2 call & put, buy further OTM wings. Quiet prior-range day; flatten 14:00 expiry / 15:00 otherwise.",
   requiredStrikeKeys(widthSteps) {
     const w = Math.max(1, widthSteps);
     return [
