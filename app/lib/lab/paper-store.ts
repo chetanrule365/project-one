@@ -8,6 +8,7 @@ import {
 import path from "node:path";
 import { getDataDir } from "../data-dir";
 import type { Leg } from "../strategies/types";
+import { isExpiryCalendarDay, normalizeExpiryDay } from "../strategies/expiry-day";
 
 export type PaperRun = {
   id: number;
@@ -36,6 +37,8 @@ export type PaperTrade = {
   pnl_inr: number | null;
   entry_at: string;
   expiry_at: string;
+  /** True when the selected chain expired on the entry session. */
+  expiry_session?: boolean;
   exit_at: string | null;
   /** Full option legs. Older rows omit this and are inferred. */
   legs?: Leg[];
@@ -78,6 +81,7 @@ function load(): PaperState {
       runs: Array.isArray(parsed.runs) ? parsed.runs : [],
       trades: Array.isArray(parsed.trades) ? parsed.trades : [],
     };
+    hydrateExpirySession(cache);
   } catch (error) {
     console.error(`[paper-store] failed to read ${file}, starting empty`, error);
     cache = structuredClone(EMPTY);
@@ -91,6 +95,28 @@ function save(state: PaperState) {
   writeFileSync(tmp, JSON.stringify(state, null, 2));
   renameSync(tmp, file);
   cache = state;
+}
+
+/** Fill missing expiry_session on older rows (entry_at === expiry_at is not reliable). */
+function hydrateExpirySession(state: PaperState) {
+  const runsById = new Map(state.runs.map((run) => [run.id, run]));
+  let dirty = false;
+  for (const trade of state.trades) {
+    if (typeof trade.expiry_session === "boolean") continue;
+    const instrumentId = runsById.get(trade.run_id)?.instrument_id;
+    trade.expiry_session = isPaperExpirySession(trade, instrumentId);
+    dirty = true;
+  }
+  if (dirty) save(state);
+}
+
+export function isPaperExpirySession(
+  trade: Pick<PaperTrade, "expiry_session" | "entry_at" | "expiry_at">,
+  instrumentId?: string,
+) {
+  if (typeof trade.expiry_session === "boolean") return trade.expiry_session;
+  if (instrumentId) return isExpiryCalendarDay(instrumentId, trade.entry_at);
+  return normalizeExpiryDay(trade.expiry_at) === trade.entry_at;
 }
 
 export function listPaperRuns() {

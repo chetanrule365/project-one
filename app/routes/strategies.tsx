@@ -422,6 +422,7 @@ export default function StrategiesPage({
                     <th className="px-3 py-2 text-left">Status</th>
                     <th className="px-3 py-2 text-left">Path</th>
                     <th className="px-3 py-2 text-left">Entry</th>
+                    <th className="px-3 py-2 text-left">Expiry day</th>
                     <th className="px-3 py-2 text-right">Legs</th>
                     <th className="px-3 py-2 text-right">Credit</th>
                     <th className="px-3 py-2 text-right">P&L ₹</th>
@@ -441,6 +442,9 @@ export default function StrategiesPage({
                       <td className="px-3 py-2 capitalize">{trade.status}</td>
                       <td className="px-3 py-2">{trade.strategy_id}</td>
                       <td className="px-3 py-2 tabular-nums">{trade.entry_at}</td>
+                      <td className="px-3 py-2">
+                        {trade.expiry_session ? "Yes" : "No"}
+                      </td>
                       <td className="px-3 py-2 text-right tabular-nums">
                         {formatPaperLegs(trade)}
                       </td>

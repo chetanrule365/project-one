@@ -146,6 +146,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
       credit: open.credit,
       pnlPoints,
       entryHour: open.entry_hour,
+      expirySession: open.expiry_session,
     });
     if (decision) {
       closeTrade(open.id, {
@@ -246,6 +247,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
         spot_entry: chain.spot,
         entry_at: today,
         expiry_at: normalizeExpiryDay(chain.expiry) || today,
+        expiry_session: ctx.expirySession,
         legs: picked.proposal.legs,
         entry_hour: hour,
       });
