@@ -21,6 +21,7 @@ const sample: PaperTradeExportRow = {
   pnl_inr: -21.00000000000051,
   entry_at: "2026-08-13",
   expiry_at: "2026-08-13",
+  expiry_session: true,
   exit_at: "2026-08-13T08:30:00.000Z",
   instrument_id: "SENSEX",
   run_strategy_id: "AUTO",
@@ -39,7 +40,9 @@ const row = lines[1] ?? "";
 const checks = [
   header.startsWith("Trade ID,Run ID,Index,"),
   header.includes("P&L INR"),
+  header.includes("Expiry session"),
   row.includes('"A & B <test>, quoted"'),
+  row.includes(",2026-08-13,2026-08-13,true,"),
   row.includes(",-0.7,-21,"),
   paperTradesExportFilename(new Date("2026-08-13T06:00:00Z")) ===
     "paper-trades-2026-08-13.csv",

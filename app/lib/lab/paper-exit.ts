@@ -19,10 +19,12 @@ export function decidePaperExit(input: {
   credit: number;
   pnlPoints: number;
   entryHour?: number | null;
+  expirySession?: boolean;
 }): PaperExitDecision | null {
   const expiryDay = normalizeExpiryDay(input.expiryAt);
   const pastExpiry = input.today > expiryDay;
-  const expirySession = input.today === expiryDay || pastExpiry;
+  const expirySession =
+    input.expirySession ?? (input.today === expiryDay || pastExpiry);
   const defaults = positionDefaults(input.strategyId, expirySession);
 
   const isDebit = input.credit < 0;

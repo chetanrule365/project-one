@@ -7,6 +7,17 @@ import {
 } from "../app/lib/strategies/expiry-day";
 import { positionDefaults } from "../app/lib/strategies/registry";
 
+const legacyDaily = decidePaperExit({
+  strategyId: "IRON_CONDOR",
+  hour: 14,
+  today: "2026-08-14",
+  expiryAt: "2026-08-14",
+  expirySession: false,
+  credit: 157.4,
+  pnlPoints: -0.7,
+  entryHour: 10,
+});
+
 const icHold = decidePaperExit({
   strategyId: "IRON_CONDOR",
   hour: 14,
@@ -90,6 +101,7 @@ const gapped = buildLiveDayStructure({
 
 const checks = [
   icHold === null,
+  legacyDaily === null,
   icFlat?.reason === "Flat by 15:00",
   icExpiry?.reason === "Flat by 14:00",
   tp?.reason === "Take profit 60%",

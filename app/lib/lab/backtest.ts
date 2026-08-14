@@ -46,6 +46,7 @@ export type BacktestTrade = {
   won: boolean;
   pickReason?: string;
   exitReason?: string;
+  expirySession: boolean;
 };
 
 export type BacktestMetrics = {
@@ -443,6 +444,7 @@ function runTradeDays(
       won: managed.pnlPoints > 0,
       pickReason: picked.reason,
       exitReason: managed.exitReason,
+      expirySession: Boolean(ctx.expirySession),
     });
   }
 

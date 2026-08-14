@@ -123,6 +123,7 @@ function BacktestResults({ result }: { result: BacktestResult }) {
               <th className="px-3 py-2 text-left">Path</th>
               <th className="px-3 py-2 text-left">Why</th>
               <th className="px-3 py-2 text-left">Day</th>
+              <th className="px-3 py-2 text-left">Expiry day</th>
               <th className="px-3 py-2 text-left">Hours</th>
               <th className="px-3 py-2 text-left">Exit</th>
               <th className="px-3 py-2 text-right">Credit</th>
@@ -142,6 +143,7 @@ function BacktestResults({ result }: { result: BacktestResult }) {
                   {trade.pickReason ?? "—"}
                 </td>
                 <td className="px-3 py-2 tabular-nums">{trade.entryDay}</td>
+                <td className="px-3 py-2">{trade.expirySession ? "Yes" : "No"}</td>
                 <td className="px-3 py-2 tabular-nums">
                   {trade.entryHour}:00→{trade.exitHour}:00
                 </td>
