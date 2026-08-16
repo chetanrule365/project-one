@@ -1,6 +1,5 @@
 import { Link } from "react-router";
 import type { Route } from "./+types/option-chain.$id";
-import { AppNav } from "../components/AppNav";
 import {
   ExpirySelect,
   OptionChainTable,
@@ -65,8 +64,6 @@ export default function OptionChainPage({
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 px-4 py-8 dark:from-gray-950 dark:via-gray-950 dark:to-gray-900">
       <div className="mx-auto max-w-6xl">
-        <AppNav />
-
         <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-sm font-medium tracking-wide text-slate-500 uppercase">

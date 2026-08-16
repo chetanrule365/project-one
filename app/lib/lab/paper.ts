@@ -1,4 +1,4 @@
-import { getIndexByParam } from "../dhan/instruments";
+import { getIndexByParam, INDEX_INSTRUMENTS } from "../dhan/instruments";
 import { loadOptionChainPage } from "../dhan/option-chain";
 import { fetchIndexQuotes, fetchPriorSessionStats } from "../dhan/quotes";
 import {
@@ -19,6 +19,7 @@ import {
 import {
   DEFAULT_WIDTH_STEPS,
   FLAT_BY_HOUR,
+  IC_SPAN_NOTIONAL_FRAC,
   lotSizeFor,
   type Strategy,
 } from "../strategies/types";
@@ -29,12 +30,11 @@ import {
   getOpenTrade,
   insertOpenTrade,
   listActiveRuns,
-  listPaperRuns,
-  listAllTradesWithInstrument,
+  listAllPaperRuns,
+  listAllPaperTrades,
   listTradesForRun,
   patchTradePnl,
   startPaperRun,
-  stopPaperRun,
   type PaperRun,
   type PaperTrade,
 } from "./paper-store";
@@ -42,6 +42,22 @@ import {
   pnlLooksBroken,
   settleTradePoints,
 } from "./paper-position";
+
+function nowIstTimestamp() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const pick = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "00";
+  return `${pick("year")}-${pick("month")}-${pick("day")}T${pick("hour")}:${pick("minute")}:${pick("second")}+05:30`;
+}
 
 function hourIst() {
   return Number(
@@ -53,18 +69,105 @@ function hourIst() {
   );
 }
 
+
+function isExpiryToday(instrumentId: string) {
+  return istWeekday(todayIst()) === expiryWeekday(instrumentId);
+}
+
+/**
+ * Capital blocked in ₹ for 1 lot.
+ * Buys: premium paid.
+ * Iron condor: Dhan-style SPAN (~4.4% of notional, ~₹70k on Nifty).
+ * Other credit spreads: defined-risk max loss (width − credit).
+ */
+export function capitalConsumedInr(trade: {
+  instrument_id?: string;
+  strategy_id: string;
+  credit: number;
+  width: number;
+  spot_entry?: number;
+}) {
+  const lot = lotSizeFor(trade.instrument_id ?? "NIFTY");
+  const debit =
+    trade.credit < 0 ||
+    trade.strategy_id === "ORB_ATM" ||
+    trade.strategy_id === "MAX_PAIN_REV";
+  if (debit) {
+    return Math.abs(trade.credit) * lot;
+  }
+  if (trade.strategy_id === "IRON_CONDOR" && trade.spot_entry) {
+    return trade.spot_entry * lot * IC_SPAN_NOTIONAL_FRAC;
+  }
+  return Math.max(0, trade.width - trade.credit) * lot;
+}
+
+export function currentMonthIst() {
+  return todayIst().slice(0, 7);
+}
+
+export function entryMonthIst(entryAt: string) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(entryAt)) return entryAt.slice(0, 7);
+  const date = new Date(entryAt);
+  if (!Number.isFinite(date.getTime())) return entryAt.slice(0, 7);
+  return date
+    .toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
+    .slice(0, 7);
+}
+
+export function formatMonthLabel(month: string) {
+  const date = new Date(`${month}-01T12:00:00+05:30`);
+  if (!Number.isFinite(date.getTime())) return month;
+  return date.toLocaleDateString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    month: "long",
+    year: "numeric",
+  });
+}
+ 
 export function getPaperSnapshot() {
   repairStoredPaperPnls();
   const activeRuns = listActiveRuns();
-  const runs = listPaperRuns();
-  const trades = listAllTradesWithInstrument();
+  const runs = listAllPaperRuns();
+  const runById = new Map(runs.map((run) => [run.id, run]));
+  const activeIds = new Set(activeRuns.map((run) => run.id));
+  const trades = listAllPaperTrades()
+    .map((trade) => {
+      const instrumentId = runById.get(trade.run_id)?.instrument_id;
+      return {
+        ...trade,
+        instrument_id: instrumentId,
+        capital_inr: capitalConsumedInr({
+          ...trade,
+          instrument_id: instrumentId,
+        }),
+      };
+    })
+    .sort((a, b) => {
+      const aActive = activeIds.has(a.run_id) ? 0 : 1;
+      const bActive = activeIds.has(b.run_id) ? 0 : 1;
+      if (aActive !== bActive) return aActive - bActive;
+      return b.id - a.id;
+    });
   return {
     activeRuns,
-    /** First active run — legacy single-run UI helpers. */
     active: activeRuns[0],
     runs,
     trades,
   };
+}
+
+/** Always-on paper: one AUTO run per index. No start/stop required. */
+export function ensureAlwaysOnPaperRuns() {
+  const active = listActiveRuns();
+  for (const instrument of INDEX_INSTRUMENTS) {
+    if (!active.some((run) => run.instrument_id === instrument.id)) {
+      startPaperRun({
+        instrumentId: instrument.id,
+        strategyId: "AUTO",
+        widthSteps: DEFAULT_WIDTH_STEPS,
+      });
+    }
+  }
 }
 
 export function startPaper(input: {
@@ -73,43 +176,67 @@ export function startPaper(input: {
   widthSteps: number;
 }) {
   const run = startPaperRun(input);
-  // Background sync while Node server stays up (browser can close).
   void import("./paper-worker").then((m) => m.ensurePaperWorker());
   return run;
 }
 
-export function stopPaper(runId: number) {
-  stopPaperRun(runId);
-}
-
-export function repairStoredPaperPnls() {
-  const lotByInstrument = new Map<string, number>();
-  for (const trade of listAllTradesWithInstrument()) {
-    if (trade.status !== "closed") continue;
-    if (trade.spot_exit == null || trade.pnl_points == null) continue;
-    const corrected = settleTradePoints(trade, trade.spot_exit);
-    if (
-      !pnlLooksBroken(trade.pnl_points, trade.credit, trade.spot_exit, corrected)
-    ) {
-      continue;
-    }
-    const lot =
-      lotByInstrument.get(trade.instrument_id) ??
-      lotSizeFor(trade.instrument_id);
-    lotByInstrument.set(trade.instrument_id, lot);
-    patchTradePnl(trade.id, {
-      pnlPoints: corrected,
-      pnlInr: corrected * lot,
-    });
-  }
-}
-
+ 
 function resolveStrategies(strategyId: string): Strategy[] {
   if (strategyId === "AUTO" || strategyId === "BOTH") {
     return listStrategies();
   }
   const strategy = getStrategy(strategyId);
   return strategy ? [strategy] : [];
+}
+
+function positionFromTrade(open: PaperTrade): OpenPosition {
+  const storedLegs = open.legs?.filter(
+    (leg) => leg.right === "CE" || leg.right === "PE",
+  );
+  const legs =
+    storedLegs && storedLegs.length > 0
+      ? storedLegs.map((leg) => ({
+          right: leg.right,
+          strike: leg.strike,
+          strikeKey: "ATM" as const,
+          qty: leg.qty,
+          premium: leg.premium,
+        }))
+      : open.credit < 0 && open.short_strike === open.long_strike
+        ? [
+            {
+              right: (open.long_side || open.short_side) as "CE" | "PE",
+              strike: open.long_strike || open.short_strike,
+              strikeKey: "ATM" as const,
+              qty: 1,
+              premium: Math.abs(open.credit),
+            },
+          ]
+        : [
+            {
+              right: open.short_side as "CE" | "PE",
+              strike: open.short_strike,
+              strikeKey: "ATM" as const,
+              qty: -1,
+              premium: Math.abs(open.credit),
+            },
+            {
+              right: open.long_side as "CE" | "PE",
+              strike: open.long_strike,
+              strikeKey: "ATM" as const,
+              qty: 1,
+              premium: 0,
+            },
+          ];
+
+  return {
+    strategyId: open.strategy_id,
+    legs,
+    netCredit: open.credit,
+    width: open.width,
+    entryAt: open.entry_at,
+    expiryAt: open.expiry_at,
+  };
 }
 
 export async function syncPaper(run?: PaperRun): Promise<{
@@ -137,22 +264,50 @@ export async function syncPaper(run?: PaperRun): Promise<{
   let opened: PaperTrade | null = null;
 
   if (open) {
-    const pnlPoints = settleTradePoints(open, chain.spot, chain.rows);
-    const decision = decidePaperExit({
-      strategyId: open.strategy_id,
-      hour,
-      today,
-      expiryAt: open.expiry_at,
-      credit: open.credit,
-      pnlPoints,
-      entryHour: open.entry_hour,
-      expirySession: open.expiry_session,
-    });
-    if (decision) {
+    const settleStrategy = getStrategy(open.strategy_id) ?? strategies[0];
+    const defaults = positionDefaults(open.strategy_id);
+    const position: OpenPosition = {
+      ...positionFromTrade(open),
+      ...defaults,
+    };
+
+    const pnlPoints = settleStrategy.settle(position, chain.spot);
+    const isDebit = open.credit < 0;
+    const risk = Math.abs(open.credit) || 1;
+    const stopLevel = isDebit
+      ? -risk * (defaults.stopMult ?? 0.35)
+      : -risk * (defaults.stopMult ?? 2);
+    const hitStop = pnlPoints <= stopLevel;
+    const flatBy =
+      defaults.flatByHour !== undefined && hour >= defaults.flatByHour;
+    const expired = today > open.expiry_at || (today === open.expiry_at && hour >= FLAT_BY_HOUR);
+
+    if (hitStop || flatBy || expired) {
+      const exitPnl = hitStop ? stopLevel : pnlPoints;
+    const settleStrategy = getStrategy(open.strategy_id) ?? strategies[0];
+    const defaults = positionDefaults(open.strategy_id);
+    const position: OpenPosition = {
+      ...positionFromTrade(open),
+      ...defaults,
+    };
+
+    const pnlPoints = settleStrategy.settle(position, chain.spot);
+    const isDebit = open.credit < 0;
+    const risk = Math.abs(open.credit) || 1;
+    const stopLevel = isDebit
+      ? -risk * (defaults.stopMult ?? 0.35)
+      : -risk * (defaults.stopMult ?? 2);
+    const hitStop = pnlPoints <= stopLevel;
+    const flatBy =
+      defaults.flatByHour !== undefined && hour >= defaults.flatByHour;
+    const expired = today > open.expiry_at || (today === open.expiry_at && hour >= FLAT_BY_HOUR);
+
+    if (hitStop || flatBy || expired) {
+      const exitPnl = hitStop ? stopLevel : pnlPoints;
       closeTrade(open.id, {
         spotExit: chain.spot,
-        pnlPoints: decision.pnlPoints,
-        pnlInr: decision.pnlPoints * lotSizeFor(instrument.id),
+        pnlPoints: Math.round(exitPnl),
+        pnlInr: Math.round(exitPnl * lotSizeFor(instrument.id)),
       });
       closed = listTradesForRun(active.id).find((t) => t.id === open.id) ?? null;
     }
@@ -245,11 +400,14 @@ export async function syncPaper(run?: PaperRun): Promise<{
         credit: picked.proposal.netCredit,
         width: picked.proposal.width,
         spot_entry: chain.spot,
-        entry_at: today,
-        expiry_at: normalizeExpiryDay(chain.expiry) || today,
-        expiry_session: ctx.expirySession,
-        legs: picked.proposal.legs,
-        entry_hour: hour,
+        entry_at: nowIstTimestamp(),
+        expiry_at: today,
+        legs: picked.proposal.legs.map((leg) => ({
+          right: leg.right,
+          strike: leg.strike,
+          qty: leg.qty,
+          premium: leg.premium,
+        })),
       });
     }
   }

@@ -27,8 +27,7 @@ export const ironCondorStrategy = assertStrategy({
   id: "IRON_CONDOR",
   name: "Iron Condor",
   bias: "Range / theta",
-  description:
-    "Sell ATM±2 call & put, buy further OTM wings. Quiet prior-range day; flatten 14:00 expiry / 15:00 otherwise.",
+  description: "Sell ATM±2 call & put, buy further OTM wings. Quiet range after morning session.",
   requiredStrikeKeys(widthSteps) {
     const w = Math.max(1, widthSteps);
     return [
@@ -82,7 +81,7 @@ export const ironCondorStrategy = assertStrategy({
         strategyId: "IRON_CONDOR",
         name: "Iron Condor",
         bias: "Range / theta",
-        description: "Iron condor on quiet range",
+        description: "Iron condor on a quiet range day",
         legs,
         maxProfit: credit,
         maxLoss: Math.max(0, width - credit),
@@ -122,7 +121,7 @@ export const ironCondorStrategy = assertStrategy({
       strategyId: "IRON_CONDOR",
       name: "Iron Condor",
       bias: "Range / theta",
-        description: "Iron condor on quiet range",
+      description: "Iron condor on a quiet range day",
       legs,
       maxProfit: credit,
       maxLoss: Math.max(0, width - credit),

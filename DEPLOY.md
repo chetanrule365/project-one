@@ -34,7 +34,7 @@ A small always-on Node service + tiny volume usually stays near Hobby. The Free 
 
 5. **Volume** (Settings → Volumes): create a volume, mount path **`/data`**. Without this, paper trades are wiped on every redeploy.
 6. **Networking**: generate a public domain.
-7. Open `https://YOUR-APP.up.railway.app/strategies` → **Start paper run** once.
+7. Open `https://YOUR-APP.up.railway.app/paper` — paper trading is always on for all indices.
 
 ## Verify
 

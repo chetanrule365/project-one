@@ -1,4 +1,8 @@
-import { buildPlaybookCards } from "../strategies/registry";
+import {
+  buildPlaybookCards,
+  buildPlaybookSnapshot,
+  type PlaybookSnapshot,
+} from "../strategies/registry";
 import type { TradeProposal } from "../strategies/types";
 
 export type CreditSpread = TradeProposal & {
@@ -9,4 +13,5 @@ export type CreditSpread = TradeProposal & {
 
 export type CreditSpreadId = string;
 
-export { buildPlaybookCards as buildCreditSpreads };
+export type { PlaybookSnapshot };
+export { buildPlaybookCards as buildCreditSpreads, buildPlaybookSnapshot };

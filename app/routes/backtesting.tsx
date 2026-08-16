@@ -1,6 +1,5 @@
 import { Form, useNavigation } from "react-router";
 import type { Route } from "./+types/backtesting";
-import { AppNav } from "../components/AppNav";
 import { INDEX_INSTRUMENTS, getIndexByParam } from "../lib/dhan/instruments";
 import { DhanApiError, DhanConfigError } from "../lib/dhan/quotes";
 import { runBacktest, type BacktestResult } from "../lib/lab/backtest";
@@ -12,7 +11,7 @@ export function meta({}: Route.MetaArgs) {
     { title: "Backtesting" },
     {
       name: "description",
-      content: "Weekday playbook historical backtests",
+      content: "Playbook historical backtests",
     },
   ];
 }
@@ -188,8 +187,6 @@ export default function BacktestingPage({
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 px-4 py-8 dark:from-gray-950 dark:via-gray-950 dark:to-gray-900">
       <div className="mx-auto max-w-6xl">
-        <AppNav />
-
         <header className="mb-6">
           <p className="text-sm font-medium tracking-wide text-slate-500 uppercase">
             Simulation
@@ -198,10 +195,9 @@ export default function BacktestingPage({
             Backtesting
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
-            Historical weekday playbook. Expiry auto path: Iron Condor → OI fade
-            → Max Pain → ORB. Other days: ORB debit spread → OI fade → Iron
-            Condor (max pain sits out). Hourly bars, not a true 15m opening
-            range. No real orders.
+            Historical playbook. Auto path: ORB → Iron Condor → Max
+            Pain → OI fade (or sit out). ORB uses hourly bars (not true 15m
+            opening range). No real orders.
           </p>
         </header>
 

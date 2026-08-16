@@ -176,6 +176,9 @@ export const LOT_SIZES: Record<string, number> = {
   SENSEX: 20,
 };
 
+/** Hedged iron-condor SPAN ≈ this fraction of index notional (Dhan Nifty IC ~₹70k). */
+export const IC_SPAN_NOTIONAL_FRAC = 0.044;
+
 export function lotSizeFor(instrumentId: string) {
   return LOT_SIZES[instrumentId] ?? 1;
 }

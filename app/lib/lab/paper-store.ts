@@ -35,6 +35,7 @@ export type PaperTrade = {
   spot_exit: number | null;
   pnl_points: number | null;
   pnl_inr: number | null;
+  /** ISO timestamp (IST offset on new rows; older rows may be YYYY-MM-DD). */
   entry_at: string;
   expiry_at: string;
   /** True when the selected chain expired on the entry session. */
@@ -42,6 +43,7 @@ export type PaperTrade = {
   exit_at: string | null;
   /** Full option legs. Older rows omit this and are inferred. */
   legs?: Leg[];
+  /** Hour of entry (0-23) when recorded; older rows may omit. */
   entry_hour?: number | null;
 };
 
@@ -123,6 +125,10 @@ export function listPaperRuns() {
   return [...load().runs].sort((a, b) => b.id - a.id).slice(0, 20);
 }
 
+export function listAllPaperRuns() {
+  return [...load().runs];
+}
+
 export function listActiveRuns() {
   return load()
     .runs.filter((run) => run.status === "active")
@@ -181,29 +187,8 @@ export function listTradesForRun(runId: number) {
     .sort((a, b) => b.id - a.id);
 }
 
-export type PaperTradeExportRow = PaperTrade & {
-  instrument_id: string;
-  run_strategy_id: string;
-  run_status: PaperRun["status"] | "";
-  width_steps: number;
-};
-
-/** All trades joined to their run, newest first. */
-export function listAllTradesWithInstrument(): PaperTradeExportRow[] {
-  const state = load();
-  const runsById = new Map(state.runs.map((run) => [run.id, run]));
-  return [...state.trades]
-    .sort((a, b) => b.id - a.id)
-    .map((trade) => {
-      const run = runsById.get(trade.run_id);
-      return {
-        ...trade,
-        instrument_id: run?.instrument_id ?? "",
-        run_strategy_id: run?.strategy_id ?? "",
-        run_status: run?.status ?? "",
-        width_steps: run?.width_steps ?? trade.width,
-      };
-    });
+export function listAllPaperTrades() {
+  return [...load().trades];
 }
 
 export function getOpenTrade(runId: number) {

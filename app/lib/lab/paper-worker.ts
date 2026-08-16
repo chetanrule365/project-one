@@ -1,7 +1,7 @@
+import { ensureAlwaysOnPaperRuns, syncPaper } from "./paper";
 import { getOpenTrade, listActiveRuns, type PaperRun } from "./paper-store";
-import { repairStoredPaperPnls, syncPaper } from "./paper";
-import { SESSION_MANAGE_UNTIL_HOUR } from "../strategies/types";
-import { isIstTradingWeekday, todayIst } from "../strategies/expiry-day";
+import { FLAT_BY_HOUR } from "../strategies/types";
+import { expiryWeekday, istWeekday, todayIst } from "../strategies/expiry-day";
 
 /** Active market-window poll (IST). */
 const ACTIVE_SYNC_MS = 60_000;
@@ -50,8 +50,8 @@ function shouldSyncNow(active: PaperRun) {
   if (open) return true;
 
   const hour = hourIst();
-  if (!isIstTradingWeekday(todayIst())) return false;
-  if (hour >= 9 && hour < SESSION_MANAGE_UNTIL_HOUR) return true;
+  if (!istWeekday(todayIst())) return false;
+  if (hour >= 9 && hour < FLAT_BY_HOUR) return true;
   return false;
 }
 
@@ -75,7 +75,6 @@ async function tick() {
   if (s.running) return;
   s.running = true;
   try {
-    repairStoredPaperPnls();
     const runs = safeActiveRuns();
     if (runs.length === 0) {
       s.lastMessage = "No active paper runs";
@@ -127,11 +126,13 @@ function schedule() {
 
 /** Start background paper sync (idempotent). Survives browser close while Node is up. */
 export function ensurePaperWorker() {
+  ensureAlwaysOnPaperRuns();
+
   const s = state();
   if (s.started) return;
   s.started = true;
   console.log(
-    "[paper-worker] started — syncs all active index runs while Node stays up",
+    "[paper-worker] started — always-on paper sync for all indices",
   );
   setTimeout(() => {
     void tick()
