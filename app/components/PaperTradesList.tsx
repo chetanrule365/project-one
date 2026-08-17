@@ -14,7 +14,7 @@ type PaperTradeRow = {
   long_strike: number;
   short_side: string;
   credit: number;
-  capital_inr?: number;
+  margin_inr?: number;
   pnl_inr: number | null;
   entry_at: string;
   exit_at?: string | null;
@@ -146,10 +146,10 @@ export function PaperTradesList({ trades }: { trades: PaperTradeRow[] }) {
               {formatLegs(trade)}
               <span className="text-slate-400"> · </span>
               {formatPremium(trade.credit)}
-              {trade.capital_inr != null ? (
+              {trade.margin_inr != null ? (
                 <>
                   <span className="text-slate-400"> · </span>
-                  Cap ₹ {formatNumber(trade.capital_inr, 0)}
+                  Margin ₹ {formatNumber(trade.margin_inr, 0)}
                 </>
               ) : null}
             </p>
@@ -168,7 +168,7 @@ export function PaperTradesList({ trades }: { trades: PaperTradeRow[] }) {
               <th className="px-3 py-2 text-left">Entry</th>
               <th className="px-3 py-2 text-right">Legs</th>
               <th className="px-3 py-2 text-right">Premium</th>
-              <th className="px-3 py-2 text-right">Capital ₹</th>
+              <th className="px-3 py-2 text-right">Margin ₹</th>
               <th className="px-3 py-2 text-right">P&L ₹</th>
             </tr>
           </thead>
@@ -195,9 +195,9 @@ export function PaperTradesList({ trades }: { trades: PaperTradeRow[] }) {
                   {formatPremium(trade.credit)}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">
-                  {trade.capital_inr == null
+                  {trade.margin_inr == null
                     ? "—"
-                    : formatNumber(trade.capital_inr, 0)}
+                    : formatNumber(trade.margin_inr, 0)}
                 </td>
                 <td
                   className={`px-3 py-2 text-right font-medium tabular-nums ${pnlClass(trade.pnl_inr)}`}

@@ -8,6 +8,7 @@ import {
 import path from "node:path";
 import { getDataDir } from "../data-dir";
 import type { Leg } from "../strategies/types";
+import { IC_SPAN_NOTIONAL_FRAC, lotSizeFor } from "../strategies/types";
 import { isExpiryCalendarDay, normalizeExpiryDay } from "../strategies/expiry-day";
 
 export type PaperRun = {
@@ -250,6 +251,7 @@ export type PaperTradeExportRow = PaperTrade & {
   run_strategy_id: string | null;
   run_status: string | null;
   width_steps: number | null;
+  margin_inr?: number | null;
 };
 
 export function listAllTradesWithInstrument(): PaperTradeExportRow[] {
@@ -257,12 +259,22 @@ export function listAllTradesWithInstrument(): PaperTradeExportRow[] {
   const runsById = new Map(state.runs.map((r) => [r.id, r]));
   return state.trades.map((trade) => {
     const run = runsById.get(trade.run_id);
+    const instrumentId = run?.instrument_id ?? null;
+    const lot = lotSizeFor(instrumentId ?? "NIFTY");
+    let margin: number | null = null;
+    if (typeof trade.spot_entry === "number" && Number.isFinite(trade.spot_entry)) {
+      margin = trade.spot_entry * lot * IC_SPAN_NOTIONAL_FRAC;
+    } else {
+      const debit = trade.credit < 0 || trade.strategy_id === "ORB_ATM" || trade.strategy_id === "MAX_PAIN_REV";
+      margin = debit ? Math.abs(trade.credit) * lot : Math.max(0, trade.width - trade.credit) * lot;
+    }
     return {
       ...trade,
-      instrument_id: run?.instrument_id ?? null,
+      instrument_id: instrumentId,
       run_strategy_id: run?.strategy_id ?? null,
       run_status: run?.status ?? null,
       width_steps: run?.width_steps ?? null,
+      margin_inr: margin,
     };
   });
 }

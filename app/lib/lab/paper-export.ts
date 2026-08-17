@@ -25,6 +25,7 @@ const HEADERS = [
   "Exit at (IST)",
   "Run status",
   "Wing width",
+  "Margin",
 ] as const;
 
 export function paperTradesExportFilename(day = new Date()) {
@@ -70,6 +71,7 @@ function tradeRow(trade: PaperTradeExportRow) {
     formatIstTimestamp(trade.exit_at),
     trade.run_status,
     trade.width_steps,
+    trade.margin_inr,
   ];
 }
 

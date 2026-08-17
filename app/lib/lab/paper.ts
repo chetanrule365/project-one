@@ -82,7 +82,7 @@ function isExpiryToday(instrumentId: string) {
  * Iron condor: Dhan-style SPAN (~4.4% of notional, ~₹70k on Nifty).
  * Other credit spreads: defined-risk max loss (width − credit).
  */
-export function capitalConsumedInr(trade: {
+export function marginConsumedInr(trade: {
   instrument_id?: string;
   strategy_id: string;
   credit: number;
@@ -90,16 +90,14 @@ export function capitalConsumedInr(trade: {
   spot_entry?: number;
 }) {
   const lot = lotSizeFor(trade.instrument_id ?? "NIFTY");
-  const debit =
-    trade.credit < 0 ||
-    trade.strategy_id === "ORB_ATM" ||
-    trade.strategy_id === "MAX_PAIN_REV";
-  if (debit) {
-    return Math.abs(trade.credit) * lot;
-  }
-  if (trade.strategy_id === "IRON_CONDOR" && trade.spot_entry) {
+  // Use the same margin calculation for all strategies: span-based margin when
+  // `spot_entry` is available (uniform notional fraction), else fall back to
+  // sensible defaults based on net credit/width.
+  if (trade.spot_entry) {
     return trade.spot_entry * lot * IC_SPAN_NOTIONAL_FRAC;
   }
+  const debit = trade.credit < 0 || trade.strategy_id === "ORB_ATM" || trade.strategy_id === "MAX_PAIN_REV";
+  if (debit) return Math.abs(trade.credit) * lot;
   return Math.max(0, trade.width - trade.credit) * lot;
 }
 
@@ -138,7 +136,7 @@ export function getPaperSnapshot() {
       return {
         ...trade,
         instrument_id: instrumentId,
-        capital_inr: capitalConsumedInr({
+        margin_inr: marginConsumedInr({
           ...trade,
           instrument_id: instrumentId,
         }),
