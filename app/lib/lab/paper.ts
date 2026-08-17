@@ -5,6 +5,7 @@ import {
   getStrategy,
   listStrategies,
   pickPlaybookPath,
+  positionDefaults,
 } from "../strategies/registry";
 import {
   buildLiveDayStructure,
@@ -22,6 +23,7 @@ import {
   IC_SPAN_NOTIONAL_FRAC,
   lotSizeFor,
   type Strategy,
+  type OpenPosition,
 } from "../strategies/types";
 import { decidePaperExit } from "./paper-exit";
 import {
@@ -71,7 +73,7 @@ function hourIst() {
 
 
 function isExpiryToday(instrumentId: string) {
-  return istWeekday(todayIst()) === expiryWeekday(instrumentId);
+  return liveExpirySession(instrumentId);
 }
 
 /**
@@ -125,7 +127,7 @@ export function formatMonthLabel(month: string) {
 }
  
 export function getPaperSnapshot() {
-  repairStoredPaperPnls();
+  // repairStoredPaperPnls() removed — ensure stored pnls are valid elsewhere
   const activeRuns = listActiveRuns();
   const runs = listAllPaperRuns();
   const runById = new Map(runs.map((run) => [run.id, run]));
@@ -278,28 +280,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
       ? -risk * (defaults.stopMult ?? 0.35)
       : -risk * (defaults.stopMult ?? 2);
     const hitStop = pnlPoints <= stopLevel;
-    const flatBy =
-      defaults.flatByHour !== undefined && hour >= defaults.flatByHour;
-    const expired = today > open.expiry_at || (today === open.expiry_at && hour >= FLAT_BY_HOUR);
-
-    if (hitStop || flatBy || expired) {
-      const exitPnl = hitStop ? stopLevel : pnlPoints;
-    const settleStrategy = getStrategy(open.strategy_id) ?? strategies[0];
-    const defaults = positionDefaults(open.strategy_id);
-    const position: OpenPosition = {
-      ...positionFromTrade(open),
-      ...defaults,
-    };
-
-    const pnlPoints = settleStrategy.settle(position, chain.spot);
-    const isDebit = open.credit < 0;
-    const risk = Math.abs(open.credit) || 1;
-    const stopLevel = isDebit
-      ? -risk * (defaults.stopMult ?? 0.35)
-      : -risk * (defaults.stopMult ?? 2);
-    const hitStop = pnlPoints <= stopLevel;
-    const flatBy =
-      defaults.flatByHour !== undefined && hour >= defaults.flatByHour;
+    const flatBy = defaults.flatByHour !== undefined && hour >= defaults.flatByHour;
     const expired = today > open.expiry_at || (today === open.expiry_at && hour >= FLAT_BY_HOUR);
 
     if (hitStop || flatBy || expired) {
@@ -405,6 +386,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
         legs: picked.proposal.legs.map((leg) => ({
           right: leg.right,
           strike: leg.strike,
+          strikeKey: leg.strikeKey,
           qty: leg.qty,
           premium: leg.premium,
         })),

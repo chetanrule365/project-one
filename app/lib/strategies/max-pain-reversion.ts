@@ -24,7 +24,6 @@ export const maxPainStrategy = assertStrategy({
   id: "MAX_PAIN_REV",
   name: "Max Pain Reversion",
   bias: "Mean reversion",
-  description:
   description: "When spot is 80–200 pts from max pain on a non-breakout day, buy ATM toward max pain.",
   requiredStrikeKeys() {
     return [strikeKey(0)];
