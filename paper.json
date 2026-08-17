@@ -1,0 +1,177 @@
+{
+  "nextRunId": 4,
+  "nextTradeId": 6,
+  "runs": [
+    {
+      "id": 1,
+      "instrument_id": "SENSEX",
+      "strategy_id": "AUTO",
+      "width_steps": 2,
+      "status": "active",
+      "created_at": "2026-08-12T15:29:30.769Z",
+      "updated_at": "2026-08-12T15:29:30.769Z"
+    },
+    {
+      "id": 2,
+      "instrument_id": "NIFTY",
+      "strategy_id": "AUTO",
+      "width_steps": 2,
+      "status": "active",
+      "created_at": "2026-08-14T05:56:47.584Z",
+      "updated_at": "2026-08-14T05:56:47.584Z"
+    },
+    {
+      "id": 3,
+      "instrument_id": "BANKNIFTY",
+      "strategy_id": "AUTO",
+      "width_steps": 2,
+      "status": "active",
+      "created_at": "2026-08-14T05:56:54.169Z",
+      "updated_at": "2026-08-14T05:56:54.169Z"
+    }
+  ],
+  "trades": [
+    {
+      "id": 1,
+      "run_id": 1,
+      "strategy_id": "ORB_ATM",
+      "short_strike": 0,
+      "long_strike": 77800,
+      "short_side": "CE",
+      "long_side": "PE",
+      "credit": -127.9,
+      "width": 50,
+      "spot_entry": 77815.4,
+      "entry_at": "2026-08-13",
+      "expiry_at": "2026-08-13",
+      "status": "closed",
+      "spot_exit": 77892.5,
+      "pnl_points": -127.9,
+      "pnl_inr": -2558,
+      "exit_at": "2026-08-13T07:30:08.349Z",
+      "expiry_session": true
+    },
+    {
+      "id": 2,
+      "run_id": 1,
+      "strategy_id": "IRON_CONDOR",
+      "short_strike": 78100,
+      "long_strike": 78300,
+      "short_side": "CE",
+      "long_side": "CE",
+      "credit": 44.699999999999996,
+      "width": 200,
+      "spot_entry": 77892.5,
+      "entry_at": "2026-08-13",
+      "expiry_at": "2026-08-13",
+      "status": "closed",
+      "spot_exit": 77953.11,
+      "pnl_points": 44.699999999999996,
+      "pnl_inr": 893.9999999999999,
+      "exit_at": "2026-08-13T08:30:11.473Z",
+      "expiry_session": true
+    },
+    {
+      "id": 3,
+      "run_id": 1,
+      "strategy_id": "IRON_CONDOR",
+      "short_strike": 78000,
+      "long_strike": 78200,
+      "short_side": "CE",
+      "long_side": "CE",
+      "credit": 153.10000000000002,
+      "width": 200,
+      "spot_entry": 77798.33,
+      "entry_at": "2026-08-14",
+      "expiry_at": "2026-08-14",
+      "legs": [
+        {
+          "right": "CE",
+          "strike": 78000,
+          "strikeKey": "ATM+2",
+          "qty": -1,
+          "premium": 370.25
+        },
+        {
+          "right": "CE",
+          "strike": 78200,
+          "strikeKey": "ATM+4",
+          "qty": 1,
+          "premium": 280.95
+        },
+        {
+          "right": "PE",
+          "strike": 77600,
+          "strikeKey": "ATM-2",
+          "qty": -1,
+          "premium": 258.8
+        },
+        {
+          "right": "PE",
+          "strike": 77400,
+          "strikeKey": "ATM-4",
+          "qty": 1,
+          "premium": 195
+        }
+      ],
+      "entry_hour": 11,
+      "status": "closed",
+      "spot_exit": 78018.82,
+      "pnl_points": -0.8999999999999773,
+      "pnl_inr": -17.999999999999545,
+      "exit_at": "2026-08-14T08:30:24.901Z",
+      "expiry_session": false
+    },
+    {
+      "id": 4,
+      "run_id": 3,
+      "strategy_id": "IRON_CONDOR",
+      "short_strike": 57600,
+      "long_strike": 57800,
+      "short_side": "CE",
+      "long_side": "CE",
+      "credit": 157.4,
+      "width": 200,
+      "spot_entry": 57446.85,
+      "entry_at": "2026-08-14",
+      "expiry_at": "2026-08-14",
+      "legs": [
+        {
+          "right": "CE",
+          "strike": 57600,
+          "strikeKey": "ATM+2",
+          "qty": -1,
+          "premium": 491
+        },
+        {
+          "right": "CE",
+          "strike": 57800,
+          "strikeKey": "ATM+4",
+          "qty": 1,
+          "premium": 392.35
+        },
+        {
+          "right": "PE",
+          "strike": 57200,
+          "strikeKey": "ATM-2",
+          "qty": -1,
+          "premium": 283.1
+        },
+        {
+          "right": "PE",
+          "strike": 57000,
+          "strikeKey": "ATM-4",
+          "qty": 1,
+          "premium": 224.35
+        }
+      ],
+      "entry_hour": 11,
+      "status": "closed",
+      "spot_exit": 57551.4,
+      "pnl_points": -0.700000000000017,
+      "pnl_inr": -21.00000000000051,
+      "exit_at": "2026-08-14T08:30:17.796Z",
+      "expiry_session": false
+    }
+  ]
+}
