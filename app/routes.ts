@@ -9,6 +9,6 @@ export default [
   route("option-chain/:id", "routes/option-chain.$id.tsx"),
   route("api/market-feed", "routes/api.market-feed.ts"),
   route("api/paper-trades.csv", "routes/api.paper-trades-export.ts"),
-  route("api/trades/:id/delete", "routes/api.trades.$id.delete.ts"),
+  route("api/trades/:id/delete", "routes/api.trades.id.delete.ts"),
 ] satisfies RouteConfig;
 
