@@ -1,15 +1,14 @@
-import type { Route } from "./+types/trades.delete";
+import type { Route } from "./+types/api.trades.id.delete";
 import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import path from "node:path";
 import { getDataDir } from "../lib/data-dir";
 
-export async function action({ request }: Route.ActionArgs) {
+export async function action({ params, request }: Route.ActionArgs) {
   if (request.method !== "DELETE") {
     return new Response("Method not allowed", { status: 405 });
   }
 
-  const url = new URL(request.url);
-  const tradeId = Number(url.searchParams.get("id"));
+  const tradeId = Number(params.id);
 
   if (!Number.isInteger(tradeId) || tradeId < 0) {
     return new Response(JSON.stringify({ error: "Invalid trade ID" }), {
