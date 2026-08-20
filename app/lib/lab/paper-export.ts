@@ -1,5 +1,9 @@
 import { listAllTradesWithInstrument, type PaperTradeExportRow } from "./paper-store";
-import { formatIstTimestamp, formatPaperLegs } from "./paper-position";
+import {
+  formatIstTimestamp,
+  formatPaperLegPrices,
+  formatPaperLegs,
+} from "./paper-position";
 
 const HEADERS = [
   "Trade ID",
@@ -9,6 +13,8 @@ const HEADERS = [
   "Path",
   "Status",
   "Legs",
+  "Entry leg prices",
+  "Exit leg prices",
   "Short strike",
   "Long strike",
   "Short side",
@@ -55,6 +61,8 @@ function tradeRow(trade: PaperTradeExportRow) {
     trade.strategy_id,
     trade.status,
     formatPaperLegs(trade),
+    formatPaperLegPrices(trade.legs),
+    formatPaperLegPrices(trade.exit_legs),
     hasShort ? trade.short_strike : "",
     trade.long_strike > 0 ? trade.long_strike : "",
     hasShort ? trade.short_side : "",
