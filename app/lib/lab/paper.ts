@@ -41,6 +41,7 @@ import {
   type PaperTrade,
 } from "./paper-store";
 import {
+  exitPremiumsFromChain,
   pnlLooksBroken,
   settleTradePoints,
 } from "./paper-position";
@@ -271,7 +272,15 @@ export async function syncPaper(run?: PaperRun): Promise<{
       ...defaults,
     };
 
-    const pnlPoints = settleStrategy.settle(position, chain.spot);
+    const exitPremiums = exitPremiumsFromChain(chain.rows, position.legs);
+    const exitLegs = position.legs.map((leg) => ({
+      ...leg,
+      premium:
+        exitPremiums[`${leg.strikeKey}:${leg.right}`] ??
+        exitPremiums[`${leg.strike}:${leg.right}`] ??
+        0,
+    }));
+    const pnlPoints = settleStrategy.settle(position, chain.spot, exitPremiums);
     const isDebit = open.credit < 0;
     const risk = Math.abs(open.credit) || 1;
     const stopLevel = isDebit
@@ -287,6 +296,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
         spotExit: chain.spot,
         pnlPoints: Math.round(exitPnl),
         pnlInr: Math.round(exitPnl * lotSizeFor(instrument.id)),
+        exitLegs,
       });
       closed = listTradesForRun(active.id).find((t) => t.id === open.id) ?? null;
     }

@@ -128,6 +128,30 @@ export function premiumsFromChain(rows: OptionChainRow[], legs: Leg[]) {
   return premiums;
 }
 
+export function exitPremiumsFromChain(rows: OptionChainRow[], legs: Leg[]) {
+  const premiums: Record<string, number> = {};
+  for (const leg of legs) {
+    const row = rows.find((item) => item.strike === leg.strike);
+    if (!row) continue;
+    const side = leg.right === "CE" ? row.ce : row.pe;
+    if (!side) continue;
+    const px = leg.qty < 0
+      ? side.ask > 0 ? side.ask : side.lastPrice
+      : side.bid > 0 ? side.bid : side.lastPrice;
+    if (!Number.isFinite(px) || px < 0) continue;
+    premiums[`${leg.strikeKey}:${leg.right}`] = px;
+    premiums[`${leg.strike}:${leg.right}`] = px;
+  }
+  return premiums;
+}
+
+export function formatPaperLegPrices(legs: Leg[] | undefined) {
+  if (!legs || legs.length === 0) return "";
+  return legs
+    .map((leg) => `${leg.strike} ${leg.right} ${leg.premium}`)
+    .join(" | ");
+}
+
 export function settleTradePoints(
   trade: PaperTrade,
   spot: number,

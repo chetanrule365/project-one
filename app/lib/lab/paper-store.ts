@@ -44,6 +44,8 @@ export type PaperTrade = {
   exit_at: string | null;
   /** Full option legs. Older rows omit this and are inferred. */
   legs?: Leg[];
+  /** Exit marks for each option leg when the trade was closed. */
+  exit_legs?: Leg[];
   /** Hour of entry (0-23) when recorded; older rows may omit. */
   entry_hour?: number | null;
 };
@@ -221,7 +223,12 @@ export function insertOpenTrade(
 
 export function closeTrade(
   tradeId: number,
-  input: { spotExit: number; pnlPoints: number; pnlInr: number },
+  input: {
+    spotExit: number;
+    pnlPoints: number;
+    pnlInr: number;
+    exitLegs?: Leg[];
+  },
 ) {
   const state = load();
   const trade = state.trades.find((item) => item.id === tradeId);
@@ -230,6 +237,7 @@ export function closeTrade(
   trade.spot_exit = input.spotExit;
   trade.pnl_points = input.pnlPoints;
   trade.pnl_inr = input.pnlInr;
+  trade.exit_legs = input.exitLegs;
   trade.exit_at = new Date().toISOString();
   save(state);
 }
