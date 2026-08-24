@@ -47,21 +47,6 @@ import {
   settleTradePoints,
 } from "./paper-position";
 
-function nowIstTimestamp() {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date());
-  const pick = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((part) => part.type === type)?.value ?? "00";
-  return `${pick("year")}-${pick("month")}-${pick("day")}T${pick("hour")}:${pick("minute")}:${pick("second")}+05:30`;
-}
 
 function hourIst() {
   return Number(
@@ -200,7 +185,7 @@ function positionFromTrade(open: PaperTrade): OpenPosition {
       ? storedLegs.map((leg) => ({
           right: leg.right,
           strike: leg.strike,
-          strikeKey: "ATM" as const,
+          strikeKey: leg.strikeKey ?? "ATM",
           qty: leg.qty,
           premium: leg.premium,
         }))
@@ -287,7 +272,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
       premium:
         exitPremiums[`${leg.strikeKey}:${leg.right}`] ??
         exitPremiums[`${leg.strike}:${leg.right}`] ??
-        0,
+        leg.premium,
     }));
     const pnlPoints = settleStrategy.settle(position, tradeChain.spot, exitPremiums);
     const isDebit = open.credit < 0;
@@ -398,7 +383,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
         credit: picked.proposal.netCredit,
         width: picked.proposal.width,
         spot_entry: entryChain.spot,
-        entry_at: nowIstTimestamp(),
+        entry_at: new Date().toISOString(),
         expiry_at: nextExpiryDateIst(instrument.id, today),
         expiry_session: ctx.expirySession,
         legs: picked.proposal.legs.map((leg) => ({
