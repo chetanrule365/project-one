@@ -13,6 +13,7 @@ import {
   computeMaxPain,
   isIstTradingWeekday,
   liveExpirySession,
+  nextExpiryDateIst,
   normalizeExpiryDay,
   oiWalls,
   todayIst,
@@ -257,12 +258,20 @@ export async function syncPaper(run?: PaperRun): Promise<{
     throw new Error("Invalid instrument or strategy on paper run");
   }
 
-  const chain = await loadOptionChainPage(instrument);
   const today = todayIst();
   const hour = hourIst();
   const open = getOpenTrade(active.id);
   let closed: PaperTrade | null = null;
   let opened: PaperTrade | null = null;
+
+  // Load the chain for the open trade's actual expiry so marks use the right strikes/prices.
+  // For the entry decision we always want the near-expiry chain; cache it separately.
+  const tradeChain = await loadOptionChainPage(instrument, open?.expiry_at ?? null);
+  // Near-expiry chain for entry decisions (may be the same object as tradeChain).
+  const entryChain =
+    !open || tradeChain.expiry === tradeChain.expiries[0]
+      ? tradeChain
+      : await loadOptionChainPage(instrument, null);
 
   if (open) {
     const settleStrategy = getStrategy(open.strategy_id) ?? strategies[0];
@@ -272,7 +281,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
       ...defaults,
     };
 
-    const exitPremiums = exitPremiumsFromChain(chain.rows, position.legs);
+    const exitPremiums = exitPremiumsFromChain(tradeChain.rows, position.legs);
     const exitLegs = position.legs.map((leg) => ({
       ...leg,
       premium:
@@ -280,7 +289,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
         exitPremiums[`${leg.strike}:${leg.right}`] ??
         0,
     }));
-    const pnlPoints = settleStrategy.settle(position, chain.spot, exitPremiums);
+    const pnlPoints = settleStrategy.settle(position, tradeChain.spot, exitPremiums);
     const isDebit = open.credit < 0;
     const risk = Math.abs(open.credit) || 1;
     const stopLevel = isDebit
@@ -293,7 +302,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
     if (hitStop || flatBy || expired) {
       const exitPnl = hitStop ? stopLevel : pnlPoints;
       closeTrade(open.id, {
-        spotExit: chain.spot,
+        spotExit: tradeChain.spot,
         pnlPoints: Math.round(exitPnl),
         pnlInr: Math.round(exitPnl * lotSizeFor(instrument.id)),
         exitLegs,
@@ -342,12 +351,12 @@ export async function syncPaper(run?: PaperRun): Promise<{
       prior = null;
     }
 
-    const subset = chainAroundAtm(chain.rows, chain.spot, 10);
+    const subset = chainAroundAtm(entryChain.rows, entryChain.spot, 10);
     const maxPain = computeMaxPain(subset);
     const walls = oiWalls(subset);
     const structure = buildLiveDayStructure({
       day: today,
-      spot: chain.spot,
+      spot: entryChain.spot,
       instrumentId: instrument.id,
       maxPain,
       putOiSupport: walls.putSupport,
@@ -358,12 +367,12 @@ export async function syncPaper(run?: PaperRun): Promise<{
 
     const ctx = {
       instrument,
-      spot: chain.spot,
+      spot: entryChain.spot,
       widthSteps: active.width_steps || DEFAULT_WIDTH_STEPS,
       hour,
       structure,
       rows: subset,
-      expirySession: liveExpirySession(instrument.id, chain.expiry),
+      expirySession: liveExpirySession(instrument.id, entryChain.expiry),
     };
 
     const picked =
@@ -388,9 +397,10 @@ export async function syncPaper(run?: PaperRun): Promise<{
         long_side: picked.proposal.primaryLongSide,
         credit: picked.proposal.netCredit,
         width: picked.proposal.width,
-        spot_entry: chain.spot,
+        spot_entry: entryChain.spot,
         entry_at: nowIstTimestamp(),
-        expiry_at: today,
+        expiry_at: nextExpiryDateIst(instrument.id, today),
+        expiry_session: ctx.expirySession,
         legs: picked.proposal.legs.map((leg) => ({
           right: leg.right,
           strike: leg.strike,
