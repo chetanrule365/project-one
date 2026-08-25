@@ -143,7 +143,7 @@ export function pickExpiryPath(ctx: EntryContext, strategyIds?: string[]) {
 }
 
 const EXPIRY_ORDER = ["IRON_CONDOR", "OI_RANGE_FADE", "MAX_PAIN_REV", "ORB_ATM"];
-const DAILY_ORDER = ["ORB_ATM", "OI_RANGE_FADE", "IRON_CONDOR", "MAX_PAIN_REV"];
+const DAILY_ORDER = ["ORB_ATM", "IRON_CONDOR", "OI_RANGE_FADE", "MAX_PAIN_REV"];
 
 export function pickPlaybookPath(ctx: EntryContext, strategyIds?: string[]): { strategy: Strategy; proposal: TradeProposal; reason: string } | null {
   const allowed = strategyIds?.length ? STRATEGIES.filter((s) => strategyIds.includes(s.id)) : STRATEGIES;
