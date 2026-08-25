@@ -14,7 +14,6 @@ import {
   isIstTradingWeekday,
   liveExpirySession,
   nextExpiryDateIst,
-  normalizeExpiryDay,
   oiWalls,
   todayIst,
 } from "../strategies/expiry-day";
@@ -26,7 +25,6 @@ import {
   type Strategy,
   type OpenPosition,
 } from "../strategies/types";
-import { decidePaperExit } from "./paper-exit";
 import {
   closeTrade,
   getActiveRun,
@@ -36,15 +34,12 @@ import {
   listAllPaperRuns,
   listAllPaperTrades,
   listTradesForRun,
-  patchTradePnl,
   startPaperRun,
   type PaperRun,
   type PaperTrade,
 } from "./paper-store";
 import {
   exitPremiumsFromChain,
-  pnlLooksBroken,
-  settleTradePoints,
 } from "./paper-position";
 
 
@@ -58,10 +53,6 @@ function hourIst() {
   );
 }
 
-
-function isExpiryToday(instrumentId: string) {
-  return liveExpirySession(instrumentId);
-}
 
 /**
  * Capital blocked in ₹ for 1 lot.

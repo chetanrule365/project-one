@@ -112,17 +112,15 @@ export function buildPlaybookSnapshot(
     return { ...proposal, id: strategy.id, available: true };
   });
 
-  const live = isExpiryDay && inEntryWindow;
+  const live = !isWeekend && inEntryWindow;
   const picked = live ? pickPlaybookPath(ctx) : null;
   const sitReason = picked
     ? null
     : isWeekend
       ? `${weekdayLabel} — market closed. Sitting out.`
-      : !isExpiryDay
-        ? `${weekdayLabel} is not expiry for ${instrument.name}. Sitting out.`
-        : !inEntryWindow
-          ? "Outside 10:00–14:00 IST. Sitting out."
-          : "No setup matches current structure.";
+      : !inEntryWindow
+        ? "Outside 10:00–14:00 IST. Sitting out."
+        : "No setup matches current structure.";
 
   const path = STRATEGIES.map((strategy) => {
     const card = spreads.find((s) => s.id === strategy.id);
@@ -173,7 +171,10 @@ export function positionDefaults(strategyId: string, expirySession?: boolean): P
     case "MAX_PAIN_REV":
       return MAX_PAIN_DEFAULTS;
     case "OI_RANGE_FADE":
-      return OI_FADE_DEFAULTS;
+      return {
+        ...OI_FADE_DEFAULTS,
+        flatByHour: expiry ? FLAT_BY_HOUR : DAILY_FLAT_BY_HOUR,
+      };
     default:
       return { stopMult: STOP_LOSS_CREDIT_MULT, flatByHour: DAILY_FLAT_BY_HOUR };
   }

@@ -334,6 +334,14 @@ export function nearLevel(spot: number, level: number | null, band = 60) {
   return Math.abs(spot - level) <= band;
 }
 
+/** Per-instrument OI wall proximity band: ~1 strike step. */
+export function nearLevelFor(spot: number, level: number | null, instrumentId: string): boolean {
+  if (level === null) return false;
+  // Use ~1.5× the typical strike step for each instrument
+  const band = instrumentId === "NIFTY" ? 75 : 150; // Nifty 50pt steps, BN/Sensex 100pt steps
+  return Math.abs(spot - level) <= band;
+}
+
 /** Strike keys ATM±0..N for rolling fetch. */
 export function atmBandKeys(n = 4) {
   const keys: string[] = [];

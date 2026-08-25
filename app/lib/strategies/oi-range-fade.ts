@@ -9,7 +9,7 @@ import {
   strikeAt,
   strikeKey,
 } from "./common";
-import { nearLevel } from "./expiry-day";
+import { nearLevelFor } from "./expiry-day";
 import {
   FLAT_BY_HOUR,
   STOP_LOSS_CREDIT_MULT,
@@ -35,14 +35,14 @@ export const oiRangeFadeStrategy = assertStrategy({
   isEligible(ctx) {
     if (ctx.hour < 10 || ctx.hour >= FLAT_BY_HOUR) return false;
     if (ctx.structure.orbBrokenUp || ctx.structure.orbBrokenDown) return false;
-    const nearPut = nearLevel(ctx.spot, ctx.structure.putOiSupport, 60);
-    const nearCall = nearLevel(ctx.spot, ctx.structure.callOiResistance, 60);
+    const nearPut = nearLevelFor(ctx.spot, ctx.structure.putOiSupport, ctx.instrument.id);
+    const nearCall = nearLevelFor(ctx.spot, ctx.structure.callOiResistance, ctx.instrument.id);
     return nearPut || nearCall;
   },
   proposeEntry(ctx) {
     const w = Math.max(1, ctx.widthSteps);
-    const nearPut = nearLevel(ctx.spot, ctx.structure.putOiSupport, 60);
-    const nearCall = nearLevel(ctx.spot, ctx.structure.callOiResistance, 60);
+    const nearPut = nearLevelFor(ctx.spot, ctx.structure.putOiSupport, ctx.instrument.id);
+    const nearCall = nearLevelFor(ctx.spot, ctx.structure.callOiResistance, ctx.instrument.id);
     if (nearPut === nearCall) return null;
 
     if (nearPut) {
