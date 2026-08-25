@@ -1,5 +1,5 @@
 import type { OptionChainRow } from "../dhan/option-chain";
-import { longPremium, settleLegs, shortPremium } from "../strategies/common";
+import { intrinsic, longPremium, settleLegs, shortPremium } from "../strategies/common";
 import type { Leg, OpenPosition, OptionRight } from "../strategies/types";
 import { positionDefaults } from "../strategies/registry";
 import type { PaperTrade } from "./paper-store";
@@ -128,7 +128,7 @@ export function premiumsFromChain(rows: OptionChainRow[], legs: Leg[]) {
   return premiums;
 }
 
-export function exitPremiumsFromChain(rows: OptionChainRow[], legs: Leg[]) {
+export function exitPremiumsFromChain(rows: OptionChainRow[], legs: Leg[], spot?: number) {
   const premiums: Record<string, number> = {};
   for (const leg of legs) {
     const row = rows.find((item) => item.strike === leg.strike);
@@ -139,8 +139,11 @@ export function exitPremiumsFromChain(rows: OptionChainRow[], legs: Leg[]) {
       ? side.ask > 0 ? side.ask : side.lastPrice
       : side.bid > 0 ? side.bid : side.lastPrice;
     if (!Number.isFinite(px) || px < 0) continue;
-    premiums[`${leg.strikeKey}:${leg.right}`] = px;
-    premiums[`${leg.strike}:${leg.right}`] = px;
+    // Floor at intrinsic value — prevents stale lastPrice from under-pricing ITM options.
+    const floor = spot !== undefined ? intrinsic(leg.right, leg.strike, spot) : 0;
+    const fair = Math.max(px, floor);
+    premiums[`${leg.strikeKey}:${leg.right}`] = fair;
+    premiums[`${leg.strike}:${leg.right}`] = fair;
   }
   return premiums;
 }

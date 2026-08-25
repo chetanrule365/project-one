@@ -266,7 +266,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
       ...defaults,
     };
 
-    const exitPremiums = exitPremiumsFromChain(tradeChain.rows, position.legs);
+    const exitPremiums = exitPremiumsFromChain(tradeChain.rows, position.legs, tradeChain.spot);
     const exitLegs = position.legs.map((leg) => ({
       ...leg,
       premium:
