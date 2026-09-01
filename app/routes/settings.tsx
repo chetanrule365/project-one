@@ -236,7 +236,7 @@ export default function SettingsPage({ loaderData, actionData }: Route.Component
 
           <Card
             title="Login with Dhan"
-            description="One-click browser login using your API key & secret (DHAN_APP_ID, DHAN_APP_SECRET from web.dhan.co). The token is stored server-side — no copy-paste. Set the API key's Redirect URL to this app's /settings/dhan-callback."
+            description="One-click browser login using your Dhan API key & secret (DHAN_APP_ID / DHAN_API_ID and DHAN_APP_SECRET / DHAN_API_SECRET from web.dhan.co). The token is stored server-side — no copy-paste. Set the API key's Redirect URL to this app's /settings/dhan-callback."
           >
             <div className="flex flex-wrap items-center gap-3">
               <Form method="post">
@@ -254,7 +254,7 @@ export default function SettingsPage({ loaderData, actionData }: Route.Component
               >
                 {status.oauthReady
                   ? "API key & secret detected"
-                  : "Set DHAN_APP_ID + DHAN_APP_SECRET to enable"}
+                  : "Set DHAN_API_ID + DHAN_API_SECRET to enable"}
               </span>
             </div>
           </Card>

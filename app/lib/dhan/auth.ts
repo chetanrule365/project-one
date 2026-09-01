@@ -146,21 +146,40 @@ function hasTotpCreds(): boolean {
   );
 }
 
+/** First non-empty value among the given env var names. */
+function firstEnv(...names: string[]): string | undefined {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
+// Dhan calls these the "API key" and "API secret"; the OAuth docs call them
+// app_id/app_secret. Accept the common spellings so a secret named either way
+// (DHAN_APP_ID / DHAN_API_ID / DHAN_API_KEY, DHAN_APP_SECRET / DHAN_API_SECRET)
+// just works.
+function readAppId(): string | undefined {
+  return firstEnv("DHAN_APP_ID", "DHAN_API_ID", "DHAN_API_KEY");
+}
+
+function readAppSecret(): string | undefined {
+  return firstEnv("DHAN_APP_SECRET", "DHAN_API_SECRET");
+}
+
 function oauthCreds(): { appId: string; appSecret: string } {
-  const appId = process.env.DHAN_APP_ID?.trim();
-  const appSecret = process.env.DHAN_APP_SECRET?.trim();
+  const appId = readAppId();
+  const appSecret = readAppSecret();
   if (!appId || !appSecret) {
     throw new DhanConfigError(
-      "Login with Dhan needs DHAN_APP_ID and DHAN_APP_SECRET (API key & secret from web.dhan.co).",
+      "Login with Dhan needs your Dhan API key & secret. Set DHAN_APP_ID (or DHAN_API_ID / DHAN_API_KEY) and DHAN_APP_SECRET (or DHAN_API_SECRET).",
     );
   }
   return { appId, appSecret };
 }
 
 export function hasOAuthCreds(): boolean {
-  return Boolean(
-    process.env.DHAN_APP_ID?.trim() && process.env.DHAN_APP_SECRET?.trim(),
-  );
+  return Boolean(readAppId() && readAppSecret());
 }
 
 // --- TOTP (RFC 6238) --------------------------------------------------------

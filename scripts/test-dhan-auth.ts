@@ -17,6 +17,9 @@ function clearAuthEnv() {
     "DHAN_TOTP_SECRET",
     "DHAN_APP_ID",
     "DHAN_APP_SECRET",
+    "DHAN_API_ID",
+    "DHAN_API_SECRET",
+    "DHAN_API_KEY",
     "DHAN_ACCESS_TOKEN",
   ]) {
     delete process.env[key];
@@ -144,7 +147,16 @@ try {
   assert.ok(generateHits >= 3, "auto-refresh minted again");
   console.log("[test] TOTP mint + cache + auto-refresh ok");
 
-  // 3d. OAuth consent + consume.
+  // 3d. OAuth creds resolve from DHAN_API_ID / DHAN_API_SECRET aliases too.
+  clearAuthEnv();
+  assert.equal(auth.hasOAuthCreds(), false, "no oauth creds by default");
+  process.env.DHAN_API_ID = "api-key-alias";
+  process.env.DHAN_API_SECRET = "api-secret-alias";
+  assert.equal(auth.hasOAuthCreds(), true, "oauth creds detected via DHAN_API_* alias");
+  delete process.env.DHAN_API_ID;
+  delete process.env.DHAN_API_SECRET;
+
+  // 3e. OAuth consent + consume.
   clearAuthEnv();
   auth.clearToken();
   process.env.DHAN_APP_ID = "app-key";
