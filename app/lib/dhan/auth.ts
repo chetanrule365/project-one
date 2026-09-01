@@ -12,14 +12,14 @@ import { DhanApiError, DhanConfigError } from "./errors";
  * module removes that daily chore by resolving (and, where possible,
  * automatically refreshing) the token from one of several sources:
  *
- *   1. A token persisted to the data volume (from an in-app login), reused
- *      until it is close to expiry.
+ *   1. A token persisted to the data volume (minted via TOTP), reused until it
+ *      is close to expiry.
  *   2. TOTP auto-login — when DHAN_CLIENT_ID + DHAN_PIN + DHAN_TOTP_SECRET are
  *      set, a fresh token is minted headlessly on demand (fully hands-off).
  *   3. The legacy DHAN_ACCESS_TOKEN env var (kept for backward compatibility).
  */
 
-export type TokenSource = "manual" | "totp" | "oauth" | "env";
+export type TokenSource = "totp" | "env";
 
 export type StoredAuth = {
   accessToken: string;
@@ -146,42 +146,6 @@ function hasTotpCreds(): boolean {
   );
 }
 
-/** First non-empty value among the given env var names. */
-function firstEnv(...names: string[]): string | undefined {
-  for (const name of names) {
-    const value = process.env[name]?.trim();
-    if (value) return value;
-  }
-  return undefined;
-}
-
-// Dhan calls these the "API key" and "API secret"; the OAuth docs call them
-// app_id/app_secret. Accept the common spellings so a secret named either way
-// (DHAN_APP_ID / DHAN_API_ID / DHAN_API_KEY, DHAN_APP_SECRET / DHAN_API_SECRET)
-// just works.
-function readAppId(): string | undefined {
-  return firstEnv("DHAN_APP_ID", "DHAN_API_ID", "DHAN_API_KEY");
-}
-
-function readAppSecret(): string | undefined {
-  return firstEnv("DHAN_APP_SECRET", "DHAN_API_SECRET");
-}
-
-function oauthCreds(): { appId: string; appSecret: string } {
-  const appId = readAppId();
-  const appSecret = readAppSecret();
-  if (!appId || !appSecret) {
-    throw new DhanConfigError(
-      "Login with Dhan needs your Dhan API key & secret. Set DHAN_APP_ID (or DHAN_API_ID / DHAN_API_KEY) and DHAN_APP_SECRET (or DHAN_API_SECRET).",
-    );
-  }
-  return { appId, appSecret };
-}
-
-export function hasOAuthCreds(): boolean {
-  return Boolean(readAppId() && readAppSecret());
-}
-
 // --- TOTP (RFC 6238) --------------------------------------------------------
 
 function base32Decode(input: string): Buffer {
@@ -295,81 +259,6 @@ export async function generateViaTotp(): Promise<StoredAuth> {
   });
 }
 
-/** OAuth step 1: create a consent session and build the browser login URL. */
-export async function generateConsent(): Promise<{
-  consentAppId: string;
-  loginUrl: string;
-}> {
-  const { appId, appSecret } = oauthCreds();
-  const clientId = process.env.DHAN_CLIENT_ID?.trim();
-
-  const url = new URL(`${authApiBase()}/app/generate-consent`);
-  if (clientId) url.searchParams.set("client_id", clientId);
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { app_id: appId, app_secret: appSecret, Accept: "application/json" },
-  });
-  const payload = (await parseJson(response)) as DhanTokenResponse & {
-    consentAppId?: string;
-  };
-  if (!response.ok || !payload.consentAppId) {
-    throw tokenError(
-      payload,
-      response.status,
-      `Consent generation failed (${response.status})`,
-    );
-  }
-
-  const loginUrl = `${authApiBase()}/login/consentApp-login?consentAppId=${encodeURIComponent(payload.consentAppId)}`;
-  return { consentAppId: payload.consentAppId, loginUrl };
-}
-
-/** OAuth step 3: exchange the tokenId from the redirect for an access token. */
-export async function consumeConsent(tokenId: string): Promise<StoredAuth> {
-  const { appId, appSecret } = oauthCreds();
-
-  const url = new URL(`${authApiBase()}/app/consumeApp-consent`);
-  url.searchParams.set("tokenId", tokenId);
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { app_id: appId, app_secret: appSecret, Accept: "application/json" },
-  });
-  const payload = await parseJson(response);
-  if (!response.ok || !payload.accessToken) {
-    throw tokenError(
-      payload,
-      response.status,
-      `Consent consume failed (${response.status})`,
-    );
-  }
-
-  console.log("[dhan-auth] stored access token via Dhan login");
-  return persist({
-    accessToken: payload.accessToken,
-    clientId: payload.dhanClientId ?? process.env.DHAN_CLIENT_ID?.trim() ?? null,
-    clientName: payload.dhanClientName ?? null,
-    expiryTime: payload.expiryTime ?? null,
-    source: "oauth",
-  });
-}
-
-/** Persist a token pasted by the user. */
-export function setManualToken(token: string, clientId?: string): StoredAuth {
-  const trimmed = token.trim();
-  if (!trimmed) {
-    throw new DhanConfigError("Access token cannot be empty.");
-  }
-  return persist({
-    accessToken: trimmed,
-    clientId: clientId?.trim() || process.env.DHAN_CLIENT_ID?.trim() || null,
-    clientName: null,
-    expiryTime: null,
-    source: "manual",
-  });
-}
-
 /** Forget any stored token. */
 export function clearToken(): void {
   const mem = memory();
@@ -417,7 +306,7 @@ export async function getAccessToken(): Promise<string> {
   if (stored?.accessToken) return stored.accessToken;
 
   throw new DhanConfigError(
-    "No Dhan access token available. Connect on the Settings page (Login with Dhan or TOTP auto-login) or set DHAN_ACCESS_TOKEN.",
+    "No Dhan access token available. Set up TOTP auto-login (DHAN_CLIENT_ID + DHAN_PIN + DHAN_TOTP_SECRET) or set DHAN_ACCESS_TOKEN.",
   );
 }
 
@@ -430,7 +319,6 @@ export type AuthStatus = {
   minutesLeft: number | null;
   expired: boolean;
   totpReady: boolean;
-  oauthReady: boolean;
   envTokenPresent: boolean;
 };
 
@@ -447,7 +335,6 @@ export function getAuthStatus(): AuthStatus {
     minutesLeft: left == null ? null : Math.round(left / 60_000),
     expired: stored ? !isUsable(stored) : false,
     totpReady: hasTotpCreds(),
-    oauthReady: hasOAuthCreds(),
     envTokenPresent,
   };
 }
