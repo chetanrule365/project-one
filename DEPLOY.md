@@ -35,7 +35,8 @@ Then pick **one** way to supply the access token (it expires every 24h):
 
 - **TOTP auto-login (recommended, hands-off):** enable TOTP on web.dhan.co
   (DhanHQ Trading APIs → Setup TOTP) and add `DHAN_PIN` + `DHAN_TOTP_SECRET`.
-  The app mints and refreshes the token itself — no daily action.
+  The app mints and refreshes the token itself — no daily action. Verify with
+  `DHAN_CLIENT_ID=… DHAN_PIN=… DHAN_TOTP_SECRET=… npx tsx scripts/dhan-token.ts`.
 - **Login with Dhan (OAuth):** add your Dhan API key & secret as
   `DHAN_APP_ID` + `DHAN_APP_SECRET` (or `DHAN_API_ID` + `DHAN_API_SECRET`) —
   API key & secret from web.dhan.co, with Redirect URL
