@@ -6,7 +6,7 @@ import {
   parsePrevClosePacket,
   parseQuotePacket,
 } from "./binary";
-import { isDhanSandbox } from "./config";
+import { isDhanSandbox, resolveDhanCredentials } from "./config";
 import {
   INDEX_INSTRUMENTS,
   SECURITY_ID_TO_INDEX,
@@ -14,7 +14,7 @@ import {
   type FeedStatus,
   type IndexQuote,
 } from "./instruments";
-import { fetchIndexQuotes, getDhanCredentials } from "./quotes";
+import { fetchIndexQuotes } from "./quotes";
 
 export type { FeedStatus };
 
@@ -58,7 +58,7 @@ class DhanMarketFeed {
     }
 
     this.mode = "websocket";
-    this.connect();
+    void this.connect();
   }
 
   seedQuotes(quotes: IndexQuote[]) {
@@ -133,7 +133,7 @@ class DhanMarketFeed {
     }
   }
 
-  private connect() {
+  private async connect() {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -141,12 +141,15 @@ class DhanMarketFeed {
 
     let credentials: { clientId: string; accessToken: string };
     try {
-      credentials = getDhanCredentials();
+      credentials = await resolveDhanCredentials();
     } catch (error) {
       this.setStatus(
         "error",
         error instanceof Error ? error.message : "Missing Dhan credentials",
       );
+      // Keep retrying (with backoff) so the feed recovers once a token is
+      // available — e.g. after logging in on the Settings page.
+      this.scheduleReconnect();
       return;
     }
 
@@ -216,7 +219,7 @@ class DhanMarketFeed {
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.connect();
+      void this.connect();
     }, delay);
   }
 

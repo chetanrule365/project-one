@@ -3,7 +3,6 @@ import {
   DhanConfigError,
   dhanPost,
   dhanRateLimitedPost,
-  getDhanCredentials,
   isDhanSandbox,
 } from "./config";
 import {
@@ -18,12 +17,7 @@ import {
   todayIst,
 } from "../strategies/expiry-day";
 
-export {
-  DhanApiError,
-  DhanConfigError,
-  getDhanCredentials,
-  isDhanSandbox,
-};
+export { DhanApiError, DhanConfigError, isDhanSandbox };
 
 type OhlcResponse = {
   status?: string;

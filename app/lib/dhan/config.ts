@@ -1,3 +1,8 @@
+import { getAccessToken, getClientId } from "./auth";
+import { DhanApiError, DhanConfigError } from "./errors";
+
+export { DhanApiError, DhanConfigError };
+
 const DEFAULT_PROD_BASE = "https://api.dhan.co";
 const DEFAULT_SANDBOX_BASE = "https://sandbox.dhan.co";
 
@@ -11,41 +16,30 @@ export function isDhanSandbox() {
   return getDhanApiBase().includes("sandbox.dhan.co");
 }
 
-export function getDhanCredentials() {
-  const clientId = process.env.DHAN_CLIENT_ID?.trim();
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim();
-
-  if (!clientId || !accessToken) {
+/**
+ * Resolve the client id + a currently-valid access token. The token is
+ * sourced (and auto-refreshed) by the token manager in ./auth, so callers no
+ * longer depend on a hand-maintained DHAN_ACCESS_TOKEN env var.
+ */
+export async function resolveDhanCredentials(): Promise<{
+  clientId: string;
+  accessToken: string;
+}> {
+  const accessToken = await getAccessToken();
+  const clientId = getClientId();
+  if (!clientId) {
     throw new DhanConfigError(
-      "Missing DHAN_CLIENT_ID or DHAN_ACCESS_TOKEN. Add them to your .env file.",
+      "Missing DHAN_CLIENT_ID. Set it in the environment.",
     );
   }
-
   return { clientId, accessToken };
-}
-
-export class DhanConfigError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "DhanConfigError";
-  }
-}
-
-export class DhanApiError extends Error {
-  status: number;
-
-  constructor(message: string, status: number) {
-    super(message);
-    this.name = "DhanApiError";
-    this.status = status;
-  }
 }
 
 export async function dhanPost<T>(
   path: string,
   body: unknown,
 ): Promise<{ status: number; payload: T }> {
-  const { clientId, accessToken } = getDhanCredentials();
+  const { clientId, accessToken } = await resolveDhanCredentials();
   const response = await fetch(`${getDhanApiBase()}${path}`, {
     method: "POST",
     headers: {

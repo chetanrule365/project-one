@@ -27,10 +27,25 @@ A small always-on Node service + tiny volume usually stays near Hobby. The Free 
 | Name | Value |
 | --- | --- |
 | `DHAN_CLIENT_ID` | your Dhan client id |
-| `DHAN_ACCESS_TOKEN` | your Dhan access token |
 | `DHAN_API_BASE` | `https://api.dhan.co` (prod) |
 | `DATA_DIR` | `/data` |
 | `NODE_ENV` | `production` |
+
+Then pick **one** way to supply the access token (it expires every 24h):
+
+- **TOTP auto-login (recommended, hands-off):** enable TOTP on web.dhan.co
+  (DhanHQ Trading APIs → Setup TOTP) and add `DHAN_PIN` + `DHAN_TOTP_SECRET`.
+  The app mints and refreshes the token itself — no daily action. Verify with
+  `DHAN_CLIENT_ID=… DHAN_PIN=… DHAN_TOTP_SECRET=… npx tsx scripts/dhan-token.ts`.
+- **Login with Dhan (OAuth):** add your Dhan API key & secret as
+  `DHAN_APP_ID` + `DHAN_APP_SECRET` (or `DHAN_API_ID` + `DHAN_API_SECRET`) —
+  API key & secret from web.dhan.co, with Redirect URL
+  `https://YOUR-APP.up.railway.app/settings/dhan-callback` — then click
+  **Login with Dhan** on the in-app **Settings** page.
+- **Manual token:** add `DHAN_ACCESS_TOKEN`, or paste a token on the Settings
+  page (it is stored on the `/data` volume and survives restarts).
+
+The stored token lives at `/data/dhan-auth.json`, so keep the volume mounted.
 
 5. **Volume** (Settings → Volumes): create a volume, mount path **`/data`**. Without this, paper trades are wiped on every redeploy.
 6. **Networking**: generate a public domain.
@@ -54,6 +69,6 @@ DATA_DIR=./data npm start
 
 ## Notes
 
-- Dhan access tokens expire — update `DHAN_ACCESS_TOKEN` in Railway when you refresh the token.
+- Dhan access tokens expire every 24h. With TOTP auto-login (or the in-app **Settings → Login with Dhan**) you never have to update it manually.
 - Still **paper only** — no real order placement.
 - Option-chain / rolling API rate limits still apply (~1 req / 3s).
