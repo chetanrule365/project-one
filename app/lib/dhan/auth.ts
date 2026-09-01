@@ -420,7 +420,7 @@ export function getAuthStatus(): AuthStatus {
   const envTokenPresent = Boolean(process.env.DHAN_ACCESS_TOKEN?.trim());
   const left = stored ? msLeft(stored) : null;
   return {
-    connected: Boolean(stored?.accessToken) || envTokenPresent || hasTotpCreds(),
+    connected: Boolean(stored?.accessToken) || envTokenPresent,
     source: stored?.source ?? (envTokenPresent ? "env" : null),
     clientId: getClientId(),
     clientName: stored?.clientName ?? null,
