@@ -7,7 +7,7 @@ const links = [
   { to: "/paper", label: "Paper", hint: "Simulated trades", end: false },
   { to: "/backtesting", label: "Backtesting", hint: "Historical runs", end: false },
   { to: "/option-chain", label: "Option Chain", hint: "Strikes and OI", end: false },
-  { to: "/settings", label: "Settings", hint: "Dhan login & token", end: false },
+  { to: "/settings", label: "Settings", hint: "Dhan token", end: false },
 ] as const;
 
 function MenuIcon({ open }: { open: boolean }) {

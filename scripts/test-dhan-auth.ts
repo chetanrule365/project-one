@@ -15,11 +15,6 @@ function clearAuthEnv() {
     "DHAN_CLIENT_ID",
     "DHAN_PIN",
     "DHAN_TOTP_SECRET",
-    "DHAN_APP_ID",
-    "DHAN_APP_SECRET",
-    "DHAN_API_ID",
-    "DHAN_API_SECRET",
-    "DHAN_API_KEY",
     "DHAN_ACCESS_TOKEN",
   ]) {
     delete process.env[key];
@@ -52,26 +47,11 @@ await assert.rejects(
 
 process.env.DHAN_ACCESS_TOKEN = "ENV_TOKEN";
 assert.equal(await auth.getAccessToken(), "ENV_TOKEN", "falls back to env token");
-
-auth.setManualToken("MANUAL_TOKEN", "1000000001");
-assert.equal(
-  await auth.getAccessToken(),
-  "MANUAL_TOKEN",
-  "stored manual token wins over env token",
-);
-assert.equal(auth.getClientId(), "1000000001", "manual client id stored");
-
-auth.clearToken();
-assert.equal(
-  await auth.getAccessToken(),
-  "ENV_TOKEN",
-  "clearing stored token falls back to env again",
-);
+assert.equal(auth.getAuthStatus().source, "env", "status reports env source");
 console.log("[test] token precedence ok");
 
-// --- 3. Network flows against a local mock auth server ---------------------
+// --- 3. TOTP flows against a local mock auth server ------------------------
 let generateHits = 0;
-let consumeHits = 0;
 let expiryMinutes = 24 * 60; // far future by default
 
 function isoIstInMinutes(minutes: number) {
@@ -92,22 +72,6 @@ const server: Server = createServer((req, res) => {
         dhanClientId: url.searchParams.get("dhanClientId"),
         dhanClientName: "TEST USER",
         expiryTime: isoIstInMinutes(expiryMinutes),
-      }),
-    );
-    return;
-  }
-  if (url.pathname === "/app/generate-consent") {
-    res.end(JSON.stringify({ consentAppId: "consent-123", consentAppStatus: "GENERATED", status: "success" }));
-    return;
-  }
-  if (url.pathname === "/app/consumeApp-consent") {
-    consumeHits += 1;
-    res.end(
-      JSON.stringify({
-        accessToken: "OAUTH_TOKEN",
-        dhanClientId: "1000000042",
-        dhanClientName: "OAUTH USER",
-        expiryTime: isoIstInMinutes(24 * 60),
       }),
     );
     return;
@@ -133,6 +97,12 @@ try {
   assert.equal(first, "TOTP_TOKEN_1", "mints token via TOTP endpoint");
   assert.equal(generateHits, 1, "one mint so far");
 
+  const status = auth.getAuthStatus();
+  assert.equal(status.source, "totp", "status reports totp source");
+  assert.equal(status.clientId, "1000000001", "status reports client id");
+  assert.equal(status.totpReady, true, "status reports totp ready");
+  assert.equal(status.connected, true, "status connected");
+
   // 3b. Far-future token is cached (no re-mint).
   const cached = await auth.getAccessToken();
   assert.equal(cached, "TOTP_TOKEN_1", "reuses cached fresh token");
@@ -146,36 +116,6 @@ try {
   assert.notEqual(refreshedA, refreshedB, "re-mints when token is near expiry");
   assert.ok(generateHits >= 3, "auto-refresh minted again");
   console.log("[test] TOTP mint + cache + auto-refresh ok");
-
-  // 3d. OAuth creds resolve from DHAN_API_ID / DHAN_API_SECRET aliases too.
-  clearAuthEnv();
-  assert.equal(auth.hasOAuthCreds(), false, "no oauth creds by default");
-  process.env.DHAN_API_ID = "api-key-alias";
-  process.env.DHAN_API_SECRET = "api-secret-alias";
-  assert.equal(auth.hasOAuthCreds(), true, "oauth creds detected via DHAN_API_* alias");
-  delete process.env.DHAN_API_ID;
-  delete process.env.DHAN_API_SECRET;
-
-  // 3e. OAuth consent + consume.
-  clearAuthEnv();
-  auth.clearToken();
-  process.env.DHAN_APP_ID = "app-key";
-  process.env.DHAN_APP_SECRET = "app-secret";
-
-  const consent = await auth.generateConsent();
-  assert.equal(consent.consentAppId, "consent-123", "consent id returned");
-  assert.match(consent.loginUrl, /consentApp-login\?consentAppId=consent-123/, "login url built");
-
-  const stored = await auth.consumeConsent("token-abc");
-  assert.equal(stored.accessToken, "OAUTH_TOKEN", "oauth token stored");
-  assert.equal(consumeHits, 1, "consume endpoint hit");
-  assert.equal(await auth.getAccessToken(), "OAUTH_TOKEN", "oauth token used");
-
-  const status = auth.getAuthStatus();
-  assert.equal(status.source, "oauth", "status reports oauth source");
-  assert.equal(status.clientId, "1000000042", "status reports client id");
-  assert.equal(status.connected, true, "status connected");
-  console.log("[test] OAuth consent + consume + status ok");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
