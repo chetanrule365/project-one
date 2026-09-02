@@ -137,7 +137,7 @@ export function LivePaperTrades({
         </p>
       ) : (
         <>
-          <ul className="space-y-2 md:hidden">
+          <ul className="space-y-2 lg:hidden">
             {trades.map((trade) => (
               <li
                 key={trade.id}
@@ -176,7 +176,7 @@ export function LivePaperTrades({
             ))}
           </ul>
 
-          <div className="hidden overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800 md:block">
+          <div className="hidden overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800 lg:block">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-50 text-xs tracking-wide text-slate-500 uppercase dark:bg-slate-900 dark:text-slate-400">
                 <tr>
