@@ -48,6 +48,12 @@ export type PaperTrade = {
   exit_legs?: Leg[];
   /** Hour of entry (0-23) when recorded; older rows may omit. */
   entry_hour?: number | null;
+  /** Live mark-to-market for open trades — refreshed by the worker each sync. */
+  mark_pnl_points?: number | null;
+  mark_pnl_inr?: number | null;
+  mark_spot?: number | null;
+  /** ISO timestamp of the last live mark. */
+  mark_at?: string | null;
 };
 
 type PaperState = {
@@ -251,6 +257,21 @@ export function patchTradePnl(
   if (!trade) return;
   trade.pnl_points = input.pnlPoints;
   trade.pnl_inr = input.pnlInr;
+  save(state);
+}
+
+/** Update the live mark-to-market P&L for an open trade. */
+export function patchTradeMark(
+  tradeId: number,
+  input: { pnlPoints: number; pnlInr: number; spot: number },
+) {
+  const state = load();
+  const trade = state.trades.find((item) => item.id === tradeId);
+  if (!trade || trade.status !== "open") return;
+  trade.mark_pnl_points = input.pnlPoints;
+  trade.mark_pnl_inr = input.pnlInr;
+  trade.mark_spot = input.spot;
+  trade.mark_at = new Date().toISOString();
   save(state);
 }
 

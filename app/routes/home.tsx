@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { useFetcher } from "react-router";
 import type { Route } from "./+types/home";
 import { IndexCard } from "../components/IndexCard";
+import { LivePaperTrades, type LiveTrade } from "../components/LivePaperTrades";
 import type { FeedStatus, IndexQuote } from "../lib/dhan/instruments";
 import { INDEX_INSTRUMENTS } from "../lib/dhan/instruments";
 import {
@@ -9,6 +11,14 @@ import {
   fetchIndexQuotes,
   isDhanSandbox,
 } from "../lib/dhan/quotes";
+import { getLivePaperTrades } from "../lib/lab/paper";
+import { ensurePaperWorker } from "../lib/lab/paper-worker";
+
+type LiveTradesData = {
+  trades: LiveTrade[];
+  totalPnlInr: number;
+  asOf: string | null;
+};
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -21,13 +31,16 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export async function loader() {
+  ensurePaperWorker();
   const sandbox = isDhanSandbox();
+  const live = getLivePaperTrades() as LiveTradesData;
 
   try {
     const quotes = await fetchIndexQuotes();
     return {
       quotes,
       sandbox,
+      live,
       error: null as string | null,
     };
   } catch (error) {
@@ -41,6 +54,7 @@ export async function loader() {
     return {
       quotes: [] as IndexQuote[],
       sandbox,
+      live,
       error: message,
     };
   }
@@ -103,6 +117,16 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   const [updatedAt, setUpdatedAt] = useState<string | null>(
     loaderData.quotes[0]?.updatedAt ?? null,
   );
+
+  const liveFetcher = useFetcher<LiveTradesData>();
+  useEffect(() => {
+    const id = setInterval(() => {
+      liveFetcher.load("/api/live-trades");
+    }, 20_000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const live = liveFetcher.data ?? loaderData.live;
 
   useEffect(() => {
     setQuotes(loaderData.quotes);
@@ -177,6 +201,14 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             ) : null}
           </div>
         </header>
+
+        <div className="mb-6">
+          <LivePaperTrades
+            trades={live.trades}
+            totalPnlInr={live.totalPnlInr}
+            asOf={live.asOf}
+          />
+        </div>
 
         {loaderData.sandbox ? (
           <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">

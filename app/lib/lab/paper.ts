@@ -34,6 +34,7 @@ import {
   listAllPaperRuns,
   listAllPaperTrades,
   listTradesForRun,
+  patchTradeMark,
   startPaperRun,
   type PaperRun,
   type PaperTrade,
@@ -132,6 +133,27 @@ export function getPaperSnapshot() {
     runs,
     trades,
   };
+}
+
+/**
+ * Open paper trades with their latest live (unrealized) mark-to-market P&L.
+ * Marks are refreshed by the paper worker each sync tick.
+ */
+export function getLivePaperTrades() {
+  const trades = getPaperSnapshot().trades.filter(
+    (trade) => trade.status === "open",
+  );
+  const totalPnlInr = trades.reduce(
+    (sum, trade) => sum + (trade.mark_pnl_inr ?? 0),
+    0,
+  );
+  const asOf =
+    trades
+      .map((trade) => trade.mark_at)
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1) ?? null;
+  return { trades, totalPnlInr, asOf };
 }
 
 /** Always-on paper: one AUTO run per index. No start/stop required. */
@@ -284,6 +306,14 @@ export async function syncPaper(run?: PaperRun): Promise<{
         exitLegs,
       });
       closed = listTradesForRun(active.id).find((t) => t.id === open.id) ?? null;
+    } else {
+      // Still open — persist the current mark-to-market so the home page can
+      // show a live, unrealized P&L without re-fetching the chain itself.
+      patchTradeMark(open.id, {
+        pnlPoints: Math.round(pnlPoints),
+        pnlInr: Math.round(pnlPoints * lotSizeFor(instrument.id)),
+        spot: tradeChain.spot,
+      });
     }
   }
 
