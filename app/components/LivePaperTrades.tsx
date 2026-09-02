@@ -182,7 +182,7 @@ export function LivePaperTrades({
                 <tr>
                   <th className="px-3 py-2 text-left">Index</th>
                   <th className="px-3 py-2 text-left">Path</th>
-                  <th className="px-3 py-2 text-right">Legs</th>
+                  <th className="px-3 py-2 text-left">Legs</th>
                   <th className="px-3 py-2 text-right">Premium</th>
                   <th className="px-3 py-2 text-right">Spot</th>
                   <th className="px-3 py-2 text-right">Live P&L ₹</th>
@@ -201,7 +201,10 @@ export function LivePaperTrades({
                       </span>
                     </td>
                     <td className="px-3 py-2">{trade.strategy_id}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">
+                    <td
+                      className="max-w-[220px] truncate px-3 py-2 tabular-nums"
+                      title={formatLegs(trade)}
+                    >
                       {formatLegs(trade)}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
