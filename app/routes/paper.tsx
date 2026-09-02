@@ -23,16 +23,18 @@ export function meta({}: Route.MetaArgs) {
 export async function loader({ request }: Route.LoaderArgs) {
   ensurePaperWorker();
   const paper = getPaperSnapshot();
+  // Past trades only — live/open positions are shown on the home page.
+  const closedTrades = paper.trades.filter((trade) => trade.status === "closed");
   const currentMonth = currentMonthIst();
   const requested = new URL(request.url).searchParams.get("month");
   const month =
     requested && /^\d{4}-\d{2}$/.test(requested) ? requested : currentMonth;
   const months = [
     ...new Set(
-      [currentMonth, ...paper.trades.map((trade) => entryMonthIst(trade.entry_at))],
+      [currentMonth, ...closedTrades.map((trade) => entryMonthIst(trade.entry_at))],
     ),
   ].sort((a, b) => b.localeCompare(a));
-  const trades = paper.trades.filter(
+  const trades = closedTrades.filter(
     (trade) => entryMonthIst(trade.entry_at) === month,
   );
   const monthPnl = trades.reduce(
@@ -78,8 +80,8 @@ export default function PaperPage({ loaderData }: Route.ComponentProps) {
             Paper trades
           </h1>
           <p className="mt-1.5 max-w-2xl text-sm leading-snug text-slate-500 dark:text-slate-400">
-            Always on while the server is running. Entries 10:00–14:00 IST on
-            each index&apos;s expiry. Simulation only — no real orders.
+            Closed trade history. Live open positions are on the Market Watch
+            home page. Simulation only — no real orders.
           </p>
         </header>
 
