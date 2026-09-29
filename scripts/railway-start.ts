@@ -1,6 +1,6 @@
 /**
- * Production HTTP entry for Railway.
- * Paper worker starts when the SSR server build loads (shared SQLite singleton).
+ * Production HTTP entry (Railway, GCP VM, local `npm start`).
+ * Paper worker starts when the SSR server build loads.
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";

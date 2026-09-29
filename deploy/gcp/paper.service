@@ -1,0 +1,23 @@
+[Unit]
+Description=Paper trading app (Node + worker)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=paper
+Group=paper
+WorkingDirectory=/opt/paper
+EnvironmentFile=-/etc/paper.env
+Environment=NODE_ENV=production
+Environment=DATA_DIR=/var/lib/paper-data
+Environment=HOST=0.0.0.0
+Environment=PORT=3000
+Environment=NODE_OPTIONS=--max-old-space-size=384
+ExecStart=/usr/bin/node /opt/paper/build/start.js
+Restart=always
+RestartSec=5
+MemoryMax=700M
+
+[Install]
+WantedBy=multi-user.target
