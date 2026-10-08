@@ -1,6 +1,6 @@
 import { ensureAlwaysOnPaperRuns, syncPaper } from "./paper";
 import { getOpenTrade, listActiveRuns, type PaperRun } from "./paper-store";
-import { FLAT_BY_HOUR } from "../strategies/types";
+import { SESSION_MANAGE_UNTIL_HOUR, istClock } from "../strategies/types";
 import { expiryWeekday, istWeekday, todayIst } from "../strategies/expiry-day";
 
 /** Active market-window poll (IST). */
@@ -35,23 +35,14 @@ function state(): WorkerState {
   return globalForWorker.__paperWorker;
 }
 
-function hourIst() {
-  return Number(
-    new Date().toLocaleTimeString("en-GB", {
-      timeZone: "Asia/Kolkata",
-      hour: "2-digit",
-      hour12: false,
-    }).slice(0, 2),
-  );
-}
-
 function shouldSyncNow(active: PaperRun) {
   const open = getOpenTrade(active.id);
   if (open) return true;
 
-  const hour = hourIst();
+  const { hour } = istClock();
   if (!istWeekday(todayIst())) return false;
-  if (hour >= 9 && hour < FLAT_BY_HOUR) return true;
+  // Morning playbook from 09:xx through 14:00 flatten, then 14:00–15:15 reversal.
+  if (hour >= 9 && hour < SESSION_MANAGE_UNTIL_HOUR) return true;
   return false;
 }
 

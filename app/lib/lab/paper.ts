@@ -5,8 +5,8 @@ import {
   getStrategy,
   listStrategies,
   pickPlaybookPath,
-  positionDefaults,
 } from "../strategies/registry";
+import { isPmSrReversal } from "../strategies/pm-sr-reversal";
 import {
   buildLiveDayStructure,
   chainAroundAtm,
@@ -19,12 +19,16 @@ import {
 } from "../strategies/expiry-day";
 import {
   DEFAULT_WIDTH_STEPS,
-  FLAT_BY_HOUR,
   IC_SPAN_NOTIONAL_FRAC,
+  inMorningEntryWindow,
+  inPmReversalEntryWindow,
+  istClock,
   lotSizeFor,
+  MORNING_PLAYBOOK_WINDOW,
   type Strategy,
   type OpenPosition,
 } from "../strategies/types";
+import { decidePaperExit } from "./paper-exit";
 import {
   closeTrade,
   getActiveRun,
@@ -45,13 +49,11 @@ import {
 
 
 function hourIst() {
-  return Number(
-    new Date().toLocaleTimeString("en-GB", {
-      timeZone: "Asia/Kolkata",
-      hour: "2-digit",
-      hour12: false,
-    }).slice(0, 2),
-  );
+  return istClock().hour;
+}
+
+function minuteIst() {
+  return istClock().minute;
 }
 
 
@@ -189,6 +191,24 @@ function resolveStrategies(strategyId: string): Strategy[] {
   return strategy ? [strategy] : [];
 }
 
+function istDayFromStamp(value: string) {
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+  const parsed = Date.parse(trimmed);
+  if (Number.isNaN(parsed)) return trimmed.slice(0, 10);
+  return new Date(parsed).toLocaleDateString("en-CA", {
+    timeZone: "Asia/Kolkata",
+  });
+}
+
+function hasPmReversalToday(runId: number, today: string) {
+  return listTradesForRun(runId).some(
+    (trade) =>
+      isPmSrReversal(trade.strategy_id) &&
+      istDayFromStamp(trade.entry_at) === today,
+  );
+}
+
 function positionFromTrade(open: PaperTrade): OpenPosition {
   const storedLegs = open.legs?.filter(
     (leg) => leg.right === "CE" || leg.right === "PE",
@@ -258,6 +278,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
 
   const today = todayIst();
   const hour = hourIst();
+  const minute = minuteIst();
   const open = getOpenTrade(active.id);
   let closed: PaperTrade | null = null;
   let opened: PaperTrade | null = null;
@@ -273,11 +294,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
 
   if (open) {
     const settleStrategy = getStrategy(open.strategy_id) ?? strategies[0];
-    const defaults = positionDefaults(open.strategy_id);
-    const position: OpenPosition = {
-      ...positionFromTrade(open),
-      ...defaults,
-    };
+    const position = positionFromTrade(open);
 
     const exitPremiums = exitPremiumsFromChain(tradeChain.rows, position.legs, tradeChain.spot);
     const exitLegs = position.legs.map((leg) => ({
@@ -288,27 +305,27 @@ export async function syncPaper(run?: PaperRun): Promise<{
         leg.premium,
     }));
     const pnlPoints = settleStrategy.settle(position, tradeChain.spot, exitPremiums);
-    const isDebit = open.credit < 0;
-    const risk = Math.abs(open.credit) || 1;
-    const stopLevel = isDebit
-      ? -risk * (defaults.stopMult ?? 0.35)
-      : -risk * (defaults.stopMult ?? 2);
-    const hitStop = pnlPoints <= stopLevel;
-    const flatBy = defaults.flatByHour !== undefined && hour >= defaults.flatByHour;
-    const expired = today > open.expiry_at || (today === open.expiry_at && hour >= FLAT_BY_HOUR);
+    const decision = decidePaperExit({
+      strategyId: open.strategy_id,
+      hour,
+      minute,
+      today,
+      expiryAt: open.expiry_at,
+      credit: open.credit,
+      pnlPoints,
+      entryHour: open.entry_hour,
+      expirySession: open.expiry_session,
+    });
 
-    if (hitStop || flatBy || expired) {
-      const exitPnl = hitStop ? stopLevel : pnlPoints;
+    if (decision) {
       closeTrade(open.id, {
         spotExit: tradeChain.spot,
-        pnlPoints: Math.round(exitPnl),
-        pnlInr: Math.round(exitPnl * lotSizeFor(instrument.id)),
+        pnlPoints: Math.round(decision.pnlPoints),
+        pnlInr: Math.round(decision.pnlPoints * lotSizeFor(instrument.id)),
         exitLegs,
       });
       closed = listTradesForRun(active.id).find((t) => t.id === open.id) ?? null;
     } else {
-      // Still open — persist the current mark-to-market so the home page can
-      // show a live, unrealized P&L without re-fetching the chain itself.
       patchTradeMark(open.id, {
         pnlPoints: Math.round(pnlPoints),
         pnlInr: Math.round(pnlPoints * lotSizeFor(instrument.id)),
@@ -329,14 +346,16 @@ export async function syncPaper(run?: PaperRun): Promise<{
           : "Weekend — sitting out.",
       };
     }
-    if (hour < 10 || hour >= FLAT_BY_HOUR) {
+    const canEnter =
+      inMorningEntryWindow(hour) || inPmReversalEntryWindow(hour, minute);
+    if (!canEnter) {
       return {
         run: active,
         opened: null,
         closed,
         message: closed
-          ? "Closed paper trade. Outside 10:00–14:00 entry window."
-          : "Outside 10:00–14:00 IST entry window.",
+          ? `Closed paper trade. Outside ${MORNING_PLAYBOOK_WINDOW} / 14:00–14:15 entry windows.`
+          : `Outside ${MORNING_PLAYBOOK_WINDOW} / 14:00–14:15 IST entry windows.`,
       };
     }
 
@@ -376,17 +395,28 @@ export async function syncPaper(run?: PaperRun): Promise<{
       spot: entryChain.spot,
       widthSteps: active.width_steps || DEFAULT_WIDTH_STEPS,
       hour,
+      minute,
       structure,
       rows: subset,
       expirySession: liveExpirySession(instrument.id, entryChain.expiry),
     };
 
+    const pmTaken = hasPmReversalToday(active.id, today);
     const picked =
       active.strategy_id === "AUTO" || active.strategy_id === "BOTH"
-        ? pickPlaybookPath(ctx)
+        ? pickPlaybookPath(
+            ctx,
+            pmTaken
+              ? strategies
+                  .map((strategy) => strategy.id)
+                  .filter((id) => !isPmSrReversal(id))
+              : undefined,
+          )
         : (() => {
             const strategy = strategies[0];
-            if (!strategy?.isEligible(ctx)) return null;
+            if (!strategy) return null;
+            if (pmTaken && isPmSrReversal(strategy.id)) return null;
+            if (!strategy.isEligible(ctx)) return null;
             const proposal = strategy.proposeEntry(ctx);
             return proposal
               ? { strategy, proposal, reason: "Single strategy" }
@@ -407,6 +437,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
         entry_at: new Date().toISOString(),
         expiry_at: nextExpiryDateIst(instrument.id, today),
         expiry_session: ctx.expirySession,
+        entry_hour: hour,
         legs: picked.proposal.legs.map((leg) => ({
           right: leg.right,
           strike: leg.strike,
@@ -418,16 +449,20 @@ export async function syncPaper(run?: PaperRun): Promise<{
     }
   }
 
+  const clock = `${hour}:${String(minute).padStart(2, "0")}`;
   const message =
     closed && opened
       ? `Closed trade and opened ${opened.strategy_id}.`
       : closed
         ? "Closed paper trade."
         : opened
-          ? `Opened ${opened.strategy_id} (${hour}:00 window).`
+          ? `Opened ${opened.strategy_id} (${clock} IST).`
           : stillOpen
             ? "Open paper trade is still active."
-            : "No playbook signal for current structure — sitting out.";
+            : hasPmReversalToday(active.id, today) &&
+                inPmReversalEntryWindow(hour, minute)
+              ? "Afternoon S/R already taken today."
+              : "No playbook signal for current structure — sitting out.";
 
   return { run: active, opened, closed, message };
 }

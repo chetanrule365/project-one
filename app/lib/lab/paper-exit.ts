@@ -8,12 +8,14 @@ export type PaperExitDecision = {
 };
 
 /**
- * Live paper exit: stop, ORB time-stop, take-profit, then flatten.
- * Expiry credits flatten at 14:00; other days at 15:00.
+ * Live paper exit: stop, time-stop, take-profit, then flatten.
+ * Morning credits flatten at 14:00 so the afternoon reversal can use the slot.
+ * Afternoon reversal flats at 15:15.
  */
 export function decidePaperExit(input: {
   strategyId: string;
   hour: number;
+  minute?: number;
   today: string;
   expiryAt: string;
   credit: number;
@@ -26,6 +28,7 @@ export function decidePaperExit(input: {
   const expirySession =
     input.expirySession ?? (input.today === expiryDay || pastExpiry);
   const defaults = positionDefaults(input.strategyId, expirySession);
+  const minute = input.minute ?? 0;
 
   const isDebit = input.credit < 0;
   const risk = Math.abs(input.credit) || 1;
@@ -50,20 +53,24 @@ export function decidePaperExit(input: {
     return { pnlPoints: input.pnlPoints, reason: "Time stop" };
   }
 
-  const flatHour = defaults.flatByHour ?? (expirySession ? FLAT_BY_HOUR : 15);
-  if (pastExpiry || input.hour >= flatHour) {
-    return {
-      pnlPoints: input.pnlPoints,
-      reason: pastExpiry ? "Past expiry" : `Flat by ${flatHour}:00`,
-    };
+  const tpFrac = defaults.takeProfitFrac;
+  if (tpFrac && input.pnlPoints >= risk * tpFrac) {
+    return { pnlPoints: input.pnlPoints, reason: "Take profit 60%" };
   }
 
-  const tpFrac = defaults.takeProfitFrac;
-  if (!isDebit && tpFrac && input.credit > 0) {
-    const tpLevel = input.credit * tpFrac;
-    if (input.pnlPoints >= tpLevel) {
-      return { pnlPoints: input.pnlPoints, reason: "Take profit 60%" };
-    }
+  const flatHour = defaults.flatByHour ?? FLAT_BY_HOUR;
+  const flatMinute = defaults.flatByMinute ?? 0;
+  const flattened =
+    input.hour > flatHour || (input.hour === flatHour && minute >= flatMinute);
+  if (pastExpiry || flattened) {
+    const clock =
+      flatMinute > 0
+        ? `${flatHour}:${String(flatMinute).padStart(2, "0")}`
+        : `${flatHour}:00`;
+    return {
+      pnlPoints: input.pnlPoints,
+      reason: pastExpiry ? "Past expiry" : `Flat by ${clock}`,
+    };
   }
 
   return null;

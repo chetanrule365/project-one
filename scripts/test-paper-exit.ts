@@ -7,18 +7,17 @@ import {
 } from "../app/lib/strategies/expiry-day";
 import { positionDefaults } from "../app/lib/strategies/registry";
 
-const legacyDaily = decidePaperExit({
+const icHold = decidePaperExit({
   strategyId: "IRON_CONDOR",
-  hour: 14,
+  hour: 13,
   today: "2026-08-14",
-  expiryAt: "2026-08-14",
-  expirySession: false,
-  credit: 157.4,
-  pnlPoints: -0.7,
+  expiryAt: "2026-08-18",
+  credit: 153.1,
+  pnlPoints: -0.9,
   entryHour: 10,
 });
 
-const icHold = decidePaperExit({
+const icFlatNonExpiry = decidePaperExit({
   strategyId: "IRON_CONDOR",
   hour: 14,
   today: "2026-08-14",
@@ -44,7 +43,7 @@ const icExpiry = decidePaperExit({
   today: "2026-08-13",
   expiryAt: "2026-08-13",
   credit: 44.7,
-  pnlPoints: 44.7,
+  pnlPoints: 10,
   entryHour: 13,
 });
 
@@ -99,25 +98,74 @@ const gapped = buildLiveDayStructure({
   prior: { high: 24400, low: 24100, close: 24300 },
 });
 
+const pmHold = decidePaperExit({
+  strategyId: "PM_SR_REVERSAL",
+  hour: 15,
+  minute: 0,
+  today: "2026-08-14",
+  expiryAt: "2026-08-18",
+  credit: -40,
+  pnlPoints: -5,
+  entryHour: 14,
+});
+
+const pmFlat = decidePaperExit({
+  strategyId: "PM_SR_REVERSAL",
+  hour: 15,
+  minute: 15,
+  today: "2026-08-14",
+  expiryAt: "2026-08-18",
+  credit: -40,
+  pnlPoints: 8,
+  entryHour: 14,
+});
+
+const pmTp = decidePaperExit({
+  strategyId: "PM_SR_REVERSAL",
+  hour: 14,
+  minute: 40,
+  today: "2026-08-14",
+  expiryAt: "2026-08-18",
+  credit: -40,
+  pnlPoints: 24,
+  entryHour: 14,
+});
+
+const pmNoTpYet = decidePaperExit({
+  strategyId: "PM_SR_REVERSAL",
+  hour: 14,
+  minute: 40,
+  today: "2026-08-14",
+  expiryAt: "2026-08-18",
+  credit: -40,
+  pnlPoints: 20,
+  entryHour: 14,
+});
+
 const checks = [
   icHold === null,
-  legacyDaily === null,
-  icFlat?.reason === "Flat by 15:00",
+  icFlatNonExpiry?.reason === "Flat by 14:00",
+  icFlat?.reason === "Flat by 14:00",
   icExpiry?.reason === "Flat by 14:00",
   tp?.reason === "Take profit 60%",
   noTpYet === null,
-  positionDefaults("IRON_CONDOR", false).flatByHour === 15,
+  positionDefaults("IRON_CONDOR", false).flatByHour === 14,
   positionDefaults("IRON_CONDOR", true).flatByHour === 14,
   normalizeExpiryDay("18-08-2026") === "2026-08-18",
   prior?.high === 102,
   live.insidePriorRange === true,
   gapped.insidePriorRange === false,
+  pmHold === null,
+  pmFlat?.reason === "Flat by 15:15",
+  pmTp?.reason === "Take profit 60%",
+  pmNoTpYet === null,
 ];
 
 if (checks.some((ok) => !ok)) {
   console.error("paper-exit checks failed", {
     checks,
     icHold,
+    icFlatNonExpiry,
     icFlat,
     icExpiry,
     tp,
@@ -125,6 +173,8 @@ if (checks.some((ok) => !ok)) {
     live: live.insidePriorRange,
     gapped: gapped.insidePriorRange,
     prior,
+    pmTp,
+    pmNoTpYet,
   });
   process.exit(1);
 }

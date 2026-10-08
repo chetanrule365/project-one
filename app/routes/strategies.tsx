@@ -7,6 +7,7 @@ import {
   DhanApiError,
   DhanConfigError,
   fetchIndexQuotes,
+  fetchPriorSessionStats,
 } from "../lib/dhan/quotes";
 import { buildPlaybookSnapshot, type PlaybookSnapshot } from "../lib/dhan/strategies";
 import { ensurePaperWorker } from "../lib/lab/paper-worker";
@@ -49,7 +50,21 @@ export async function loader({ request }: Route.LoaderArgs) {
       quote = undefined;
     }
 
-    snapshot = buildPlaybookSnapshot(chain.rows, chain.spot, widthSteps, quote, instrument);
+    let prior: { high: number; low: number; close: number } | null = null;
+    try {
+      prior = await fetchPriorSessionStats(instrument);
+    } catch {
+      prior = null;
+    }
+
+    snapshot = buildPlaybookSnapshot(
+      chain.rows,
+      chain.spot,
+      widthSteps,
+      quote,
+      instrument,
+      prior,
+    );
     expiry = chain.expiry;
     spot = chain.spot;
   } catch (error) {
@@ -102,7 +117,8 @@ export default function StrategiesPage(props: Route.ComponentProps) {
         <header className="mb-4 sm:mb-6">
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl dark:text-white">Playbook</h1>
           <p className="mt-1.5 max-w-2xl text-sm leading-snug text-slate-500 dark:text-slate-400">
-            Live setups for Nifty, Bank Nifty, and Sensex. Simulation only — no real orders. {" "}
+            Morning Playbook 10:00–14:00 IST, then Afternoon S/R Reversal 14:00–14:15
+            (flat 15:15). Simulation only — no real orders. {" "}
             <Link to="/paper" className="font-medium text-sky-700 underline-offset-2 hover:underline dark:text-sky-300">Paper trades</Link>
           </p>
         </header>

@@ -6,6 +6,7 @@ import {
 } from "../app/lib/strategies/expiry-day";
 import { maxPainStrategy } from "../app/lib/strategies/max-pain-reversion";
 import { orbAtmStrategy } from "../app/lib/strategies/orb-atm";
+import { pmSrReversalStrategy } from "../app/lib/strategies/pm-sr-reversal";
 import { pickPlaybookPath } from "../app/lib/strategies/registry";
 import type { DayStructure, EntryContext } from "../app/lib/strategies/types";
 
@@ -93,6 +94,63 @@ const checks = [
   dailyOrbProposal?.legs.length === 2,
   (dailyOrbProposal?.maxLoss ?? 0) < 180,
   pickPlaybookPath(dailyOrb)?.strategy.id === "ORB_ATM",
+  !pmSrReversalStrategy.isEligible(ctx({ hour: 10 })),
+  !pmSrReversalStrategy.isEligible(ctx({ hour: 14, minute: 20 })),
+  !pmSrReversalStrategy.isEligible(
+    ctx({
+      hour: 14,
+      minute: 8,
+      spot: 77900,
+      strikes: { ATM: 77900 },
+      structure: structure({
+        putOiSupport: 77600,
+        callOiResistance: 78200,
+        priorLow: 77600,
+        priorHigh: 78200,
+        morningLow: 77700,
+        morningHigh: 78100,
+        sessionLow: 77700,
+        sessionHigh: 78100,
+      }),
+    }),
+  ),
+  pmSrReversalStrategy.isEligible(
+    ctx({
+      hour: 14,
+      minute: 8,
+      spot: 77620,
+      strikes: { ATM: 77600 },
+      structure: structure({
+        putOiSupport: 77600,
+        morningLow: 77610,
+        priorLow: 77600,
+        sessionLow: 77610,
+        orbBrokenUp: false,
+        orbBrokenDown: false,
+      }),
+    }),
+  ) === true,
+  pickPlaybookPath(
+    ctx({
+      hour: 14,
+      minute: 8,
+      spot: 77620,
+      premiums: {
+        "ATM:CE": 120,
+        "ATM+2:CE": 40,
+        "ATM:PE": 90,
+        "ATM-2:PE": 30,
+      },
+      strikes: { ATM: 77600, "ATM+2": 77800, "ATM-2": 77400 },
+      structure: structure({
+        putOiSupport: 77600,
+        morningLow: 77610,
+        priorLow: 77600,
+        sessionLow: 77610,
+        orbBrokenDown: false,
+      }),
+    }),
+  )?.strategy.id === "PM_SR_REVERSAL",
   isIstTradingWeekday("2026-08-14") === true,
   isIstTradingWeekday("2026-08-15") === false,
 ];

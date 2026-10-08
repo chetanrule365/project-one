@@ -88,22 +88,17 @@ ZONE=us-east1-b bash deploy/gcp/provision.sh
 
 ---
 
-# Alternative: Railway (paid Hobby)
+# Railway Free (serverless)
 
-Railway is **free to try**, not free forever for 24/7:
-
-| Stage | Cost |
-| --- | --- |
-| Trial | ~$5 credits / 30 days |
-| Ongoing (realistic) | **Hobby ~$5/month** (includes $5 usage credit) |
-| Free after trial | Serverless only — paper worker sleeps |
+Free plan deploys **must** be serverless (`sleepApplication` in `railway.toml`).
+The service sleeps after ~5–10 minutes with no traffic. Opening the site (or a
+weekday ping) wakes it; the paper worker starts with the process.
 
 ## Railway setup
 
 1. Push this repo to GitHub.
-2. Open [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub** → select this repo.
-3. Railway will build via the included `Dockerfile`.
-4. **Variables** (Settings → Variables):
+2. Open [railway.app](https://railway.app) → your service → **Settings → Deploy → Serverless** → **on**.
+3. **Settings → Variables:**
 
 | Name | Value |
 | --- | --- |
@@ -111,20 +106,29 @@ Railway is **free to try**, not free forever for 24/7:
 | `DHAN_API_BASE` | `https://api.dhan.co` (prod) |
 | `DATA_DIR` | `/data` |
 | `NODE_ENV` | `production` |
+| `DHAN_PIN` | Dhan PIN (TOTP) |
+| `DHAN_TOTP_SECRET` | TOTP secret from web.dhan.co |
 
-Then supply the access token (it expires every 24h):
+4. **Volume:** mount path **`/data`** (keeps `paper.json` across sleeps).
+5. **Networking:** public domain.
+6. Deploy with **Deploy latest commit** (not Redeploy on an old failed build).
 
-- **TOTP auto-login (recommended, hands-off):** enable TOTP on web.dhan.co
-  (DhanHQ Trading APIs → Setup TOTP) and add `DHAN_PIN` + `DHAN_TOTP_SECRET`.
-  The app mints and refreshes the token itself — no daily action. Verify with
-  `DHAN_CLIENT_ID=… DHAN_PIN=… DHAN_TOTP_SECRET=… npx tsx scripts/dhan-token.ts`.
-- **Fallback:** add `DHAN_ACCESS_TOKEN` (a token generated from web.dhan.co).
+### Wake for 10:00 IST entries
 
-The minted token is cached at `/data/dhan-auth.json`, so keep the volume mounted.
+If nobody opens the site, the worker stays asleep and will not enter at 10:00.
+Add a free ping (e.g. [cron-job.org](https://cron-job.org)) to:
 
-5. **Volume** (Settings → Volumes): create a volume, mount path **`/data`**. Without this, paper trades are wiped on every redeploy.
-6. **Networking**: generate a public domain.
-7. Open `https://YOUR-APP.up.railway.app/paper` — paper trading is always on for all indices.
+`https://YOUR-APP.up.railway.app/healthz`
+
+- Every 5 minutes
+- Monday–Friday
+- 04:20–09:50 UTC (09:50–15:20 IST)
+
+While awake, Dhan calls during the session keep it from sleeping. Overnight it
+sleeps so you stay near the $1 credit.
+
+Hobby ($5/month, Serverless **off**) is still the path for unattended 24/7
+without an external ping.
 
 ## Local production-like start
 

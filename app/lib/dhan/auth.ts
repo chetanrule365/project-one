@@ -36,23 +36,101 @@ const REFRESH_MARGIN_MS = 15 * 60_000;
 /** Assumed validity window for tokens with no known expiry (Dhan ≈ 24h). */
 const ASSUMED_VALIDITY_MS = (24 * 60 - 15) * 60_000;
 
+type TotpCooldown = {
+  untilMs: number;
+  message: string;
+};
+
 const globalForAuth = globalThis as typeof globalThis & {
   __dhanAuth?: {
     current: StoredAuth | null;
     loaded: boolean;
     inflight: Promise<string> | null;
+    cooldown: TotpCooldown | null;
+    cooldownLoaded: boolean;
   };
 };
 
 function memory() {
   if (!globalForAuth.__dhanAuth) {
-    globalForAuth.__dhanAuth = { current: null, loaded: false, inflight: null };
+    globalForAuth.__dhanAuth = {
+      current: null,
+      loaded: false,
+      inflight: null,
+      cooldown: null,
+      cooldownLoaded: false,
+    };
   }
   return globalForAuth.__dhanAuth;
 }
 
 function authFilePath() {
   return path.join(getDataDir(), "dhan-auth.json");
+}
+
+function cooldownFilePath() {
+  return path.join(getDataDir(), "dhan-totp-cooldown.json");
+}
+
+function totpCooldownMs(message: string) {
+  const lower = message.toLowerCase();
+  if (lower.includes("too many")) return 45 * 60_000;
+  if (lower.includes("invalid pin") || lower.includes("invalid totp")) {
+    return 15 * 60_000;
+  }
+  return 2 * 60_000;
+}
+
+function readCooldown(): TotpCooldown | null {
+  const mem = memory();
+  if (mem.cooldownLoaded) {
+    if (mem.cooldown && mem.cooldown.untilMs <= Date.now()) {
+      mem.cooldown = null;
+    }
+    return mem.cooldown;
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(cooldownFilePath(), "utf8")) as TotpCooldown;
+    mem.cooldown =
+      parsed?.untilMs && parsed.untilMs > Date.now() ? parsed : null;
+  } catch {
+    mem.cooldown = null;
+  }
+  mem.cooldownLoaded = true;
+  return mem.cooldown;
+}
+
+function writeCooldown(cooldown: TotpCooldown) {
+  const mem = memory();
+  mem.cooldown = cooldown;
+  mem.cooldownLoaded = true;
+  try {
+    mkdirSync(getDataDir(), { recursive: true });
+    writeFileSync(cooldownFilePath(), JSON.stringify(cooldown), "utf8");
+  } catch (error) {
+    console.error("[dhan-auth] failed to persist TOTP cooldown", error);
+  }
+}
+
+function clearCooldown() {
+  const mem = memory();
+  mem.cooldown = null;
+  mem.cooldownLoaded = true;
+  try {
+    rmSync(cooldownFilePath());
+  } catch {
+    // no cooldown file
+  }
+}
+
+function assertTotpAllowed() {
+  const cooldown = readCooldown();
+  if (!cooldown) return;
+  const mins = Math.max(1, Math.ceil((cooldown.untilMs - Date.now()) / 60_000));
+  throw new DhanApiError(
+    `${cooldown.message} Waiting ${mins} min before another TOTP login (Dhan rate limit).`,
+    429,
+  );
 }
 
 function authApiBase() {
@@ -230,6 +308,8 @@ export async function generateViaTotp(): Promise<StoredAuth> {
     );
   }
 
+  assertTotpAllowed();
+
   const totp = generateTotp(secret);
   const url = new URL(`${authApiBase()}/app/generateAccessToken`);
   url.searchParams.set("dhanClientId", clientId);
@@ -242,13 +322,19 @@ export async function generateViaTotp(): Promise<StoredAuth> {
   });
   const payload = await parseJson(response);
   if (!response.ok || !payload.accessToken) {
-    throw tokenError(
+    const error = tokenError(
       payload,
       response.status,
       `TOTP token generation failed (${response.status})`,
     );
+    writeCooldown({
+      untilMs: Date.now() + totpCooldownMs(error.message),
+      message: error.message,
+    });
+    throw error;
   }
 
+  clearCooldown();
   console.log("[dhan-auth] minted access token via TOTP");
   return persist({
     accessToken: payload.accessToken,
@@ -291,6 +377,15 @@ export async function getAccessToken(): Promise<string> {
     if (!mem.inflight) {
       mem.inflight = generateViaTotp()
         .then((auth) => auth.accessToken)
+        .catch((error) => {
+          const envToken = process.env.DHAN_ACCESS_TOKEN?.trim();
+          if (envToken) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.warn(`[dhan-auth] TOTP unavailable (${message}); using DHAN_ACCESS_TOKEN`);
+            return envToken;
+          }
+          throw error;
+        })
         .finally(() => {
           mem.inflight = null;
         });

@@ -91,7 +91,8 @@ export function StrategyCards({
               Playbook
             </h2>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              10:00–14:00 IST · expiry sells premium first; other days prefer ORB
+              Morning Playbook 10:00–14:00 · Afternoon S/R Reversal 14:00–14:15
+              (flat 15:15)
             </p>
           </div>
 

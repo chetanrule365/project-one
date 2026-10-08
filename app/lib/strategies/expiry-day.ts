@@ -320,6 +320,8 @@ export function buildDayStructure(input: {
     putOiSupport: input.putOiSupport,
     callOiResistance: input.callOiResistance,
     distToMaxPain,
+    sessionHigh: morningHigh,
+    sessionLow: morningLow,
   };
 }
 
@@ -334,12 +336,26 @@ export function nearLevel(spot: number, level: number | null, band = 60) {
   return Math.abs(spot - level) <= band;
 }
 
-/** Per-instrument OI wall proximity band: ~1 strike step. */
+export function strikeStepPts(instrumentId: string) {
+  return instrumentId === "NIFTY" ? 50 : 100;
+}
+
+/** Per-instrument OI wall proximity band: ~1.5 strike steps. */
 export function nearLevelFor(spot: number, level: number | null, instrumentId: string): boolean {
   if (level === null) return false;
-  // Use ~1.5× the typical strike step for each instrument
-  const band = instrumentId === "NIFTY" ? 75 : 150; // Nifty 50pt steps, BN/Sensex 100pt steps
-  return Math.abs(spot - level) <= band;
+  return Math.abs(spot - level) <= strikeStepPts(instrumentId) * 1.5;
+}
+
+/** True when price is on the strike (one step), not merely nearby. */
+export function atStrikeLevel(
+  price: number,
+  level: number | null | undefined,
+  instrumentId: string,
+): boolean {
+  if (level == null || !Number.isFinite(price) || !Number.isFinite(level)) {
+    return false;
+  }
+  return Math.abs(price - level) <= strikeStepPts(instrumentId);
 }
 
 /** Strike keys ATM±0..N for rolling fetch. */
@@ -409,6 +425,8 @@ export function applyLiveQuoteStructure(
   }
   structure.orbBrokenUp = orbBrokenUp;
   structure.orbBrokenDown = orbBrokenDown;
+  structure.sessionHigh = quote.high || structure.sessionHigh || structure.morningHigh;
+  structure.sessionLow = quote.low || structure.sessionLow || structure.morningLow;
   return structure;
 }
 

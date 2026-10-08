@@ -21,7 +21,7 @@ import {
 /**
  * Iron Condor — quiet range after morning range forms (~10:00).
  * Short ATM±2, long wings widthSteps further (default 2 ≈ 100 pts).
- * Expiry: flatten by 14:00 IST. Other weekdays: hold to 15:00 unless stop / 60% TP.
+ * Flatten by 14:00 IST (stop / 60% TP earlier) so the afternoon reversal can use the slot.
  */
 export const ironCondorStrategy = assertStrategy({
   id: "IRON_CONDOR",

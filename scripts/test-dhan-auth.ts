@@ -53,6 +53,7 @@ console.log("[test] token precedence ok");
 // --- 3. TOTP flows against a local mock auth server ------------------------
 let generateHits = 0;
 let expiryMinutes = 24 * 60; // far future by default
+let failMessage: string | null = null;
 
 function isoIstInMinutes(minutes: number) {
   // Return a tz-less IST timestamp `minutes` from now (matches Dhan format).
@@ -66,6 +67,11 @@ const server: Server = createServer((req, res) => {
 
   if (url.pathname === "/app/generateAccessToken") {
     generateHits += 1;
+    if (failMessage) {
+      res.statusCode = 400;
+      res.end(JSON.stringify({ message: failMessage }));
+      return;
+    }
     res.end(
       JSON.stringify({
         accessToken: `TOTP_TOKEN_${generateHits}`,
@@ -116,6 +122,24 @@ try {
   assert.notEqual(refreshedA, refreshedB, "re-mints when token is near expiry");
   assert.ok(generateHits >= 3, "auto-refresh minted again");
   console.log("[test] TOTP mint + cache + auto-refresh ok");
+
+  // 3d. Failed PIN does not hammer Dhan on the next call.
+  auth.clearToken();
+  failMessage = "Invalid Pin";
+  const hitsBefore = generateHits;
+  await assert.rejects(
+    auth.generateViaTotp(),
+    /Invalid Pin/,
+    "surfaces Dhan invalid pin",
+  );
+  assert.equal(generateHits, hitsBefore + 1, "one failed mint");
+  await assert.rejects(
+    auth.generateViaTotp(),
+    /Waiting \d+ min/,
+    "cooldown blocks a second Dhan call",
+  );
+  assert.equal(generateHits, hitsBefore + 1, "cooldown skipped Dhan");
+  console.log("[test] TOTP failure cooldown ok");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
