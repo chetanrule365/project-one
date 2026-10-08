@@ -123,16 +123,22 @@ try {
   assert.ok(generateHits >= 3, "auto-refresh minted again");
   console.log("[test] TOTP mint + cache + auto-refresh ok");
 
-  // 3d. Failed PIN does not hammer Dhan on the next call.
+  // 3d. Failed PIN does not hammer Dhan, and does not silently use a dead env token.
   auth.clearToken();
   failMessage = "Invalid Pin";
+  process.env.DHAN_ACCESS_TOKEN = "ENV_DEAD";
   const hitsBefore = generateHits;
   await assert.rejects(
-    auth.generateViaTotp(),
+    auth.getAccessToken(),
     /Invalid Pin/,
-    "surfaces Dhan invalid pin",
+    "surfaces Dhan invalid pin instead of env fallback",
   );
   assert.equal(generateHits, hitsBefore + 1, "one failed mint");
+  assert.equal(
+    auth.getAuthStatus().connected,
+    false,
+    "TOTP ready but no usable stored token is not connected",
+  );
   await assert.rejects(
     auth.generateViaTotp(),
     /Waiting \d+ min/,

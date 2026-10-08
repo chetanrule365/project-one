@@ -1,4 +1,9 @@
-import { getAccessToken, getClientId } from "./auth";
+import {
+  getAccessToken,
+  getClientId,
+  invalidateAccessToken,
+  noteRejectedToken,
+} from "./auth";
 import { DhanApiError, DhanConfigError } from "./errors";
 
 export { DhanApiError, DhanConfigError };
@@ -35,7 +40,7 @@ export async function resolveDhanCredentials(): Promise<{
   return { clientId, accessToken };
 }
 
-export async function dhanPost<T>(
+async function dhanPostOnce<T>(
   path: string,
   body: unknown,
 ): Promise<{ status: number; payload: T }> {
@@ -53,6 +58,31 @@ export async function dhanPost<T>(
 
   const payload = (await response.json()) as T;
   return { status: response.status, payload };
+}
+
+export async function dhanPost<T>(
+  path: string,
+  body: unknown,
+): Promise<{ status: number; payload: T }> {
+  const first = await dhanPostOnce<T>(path, body);
+  if (first.status !== 401) return first;
+
+  invalidateAccessToken();
+  try {
+    await getAccessToken({ forceRefresh: true });
+  } catch (error) {
+    if (error instanceof DhanApiError || error instanceof DhanConfigError) {
+      throw error;
+    }
+    return first;
+  }
+
+  const retry = await dhanPostOnce<T>(path, body);
+  if (retry.status === 401) {
+    invalidateAccessToken();
+    noteRejectedToken();
+  }
+  return retry;
 }
 
 /** Dhan option-chain / charts endpoints allow ~1 request / 3s. Serialize + space them out. */

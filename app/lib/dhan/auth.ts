@@ -16,7 +16,8 @@ import { DhanApiError, DhanConfigError } from "./errors";
  *      is close to expiry.
  *   2. TOTP auto-login — when DHAN_CLIENT_ID + DHAN_PIN + DHAN_TOTP_SECRET are
  *      set, a fresh token is minted headlessly on demand (fully hands-off).
- *   3. The legacy DHAN_ACCESS_TOKEN env var (kept for backward compatibility).
+ *   3. DHAN_ACCESS_TOKEN only when TOTP is not configured. Never used as a
+ *      silent fallback after TOTP fails — that served a dead token all day.
  */
 
 export type TokenSource = "totp" | "env";
@@ -75,7 +76,12 @@ function cooldownFilePath() {
 function totpCooldownMs(message: string) {
   const lower = message.toLowerCase();
   if (lower.includes("too many")) return 45 * 60_000;
-  if (lower.includes("invalid pin") || lower.includes("invalid totp")) {
+  if (
+    lower.includes("invalid pin") ||
+    lower.includes("invalid totp") ||
+    lower.includes("401") ||
+    lower.includes("rejected")
+  ) {
     return 15 * 60_000;
   }
   return 2 * 60_000;
@@ -357,6 +363,19 @@ export function clearToken(): void {
   }
 }
 
+/** Drop a token Dhan just rejected so the next call remints instead of reusing it. */
+export function invalidateAccessToken(): void {
+  clearToken();
+}
+
+/** After a remint still gets 401, pause TOTP so we do not hammer Dhan. */
+export function noteRejectedToken(): void {
+  writeCooldown({
+    untilMs: Date.now() + totpCooldownMs("Dhan rejected the access token (401)."),
+    message: "Dhan rejected the access token (401).",
+  });
+}
+
 export function getClientId(): string | null {
   const env = process.env.DHAN_CLIENT_ID?.trim();
   if (env) return env;
@@ -367,22 +386,24 @@ export function getClientId(): string | null {
  * Resolve a usable access token, refreshing automatically when possible.
  * Concurrent callers share a single in-flight refresh.
  */
-export async function getAccessToken(): Promise<string> {
+export async function getAccessToken(options?: {
+  forceRefresh?: boolean;
+}): Promise<string> {
   const mem = memory();
   const stored = readStored();
+  const forceRefresh = options?.forceRefresh === true;
 
-  if (stored && isFresh(stored)) return stored.accessToken;
+  if (!forceRefresh && stored && isFresh(stored)) return stored.accessToken;
 
   if (hasTotpCreds()) {
     if (!mem.inflight) {
       mem.inflight = generateViaTotp()
         .then((auth) => auth.accessToken)
         .catch((error) => {
-          const envToken = process.env.DHAN_ACCESS_TOKEN?.trim();
-          if (envToken) {
+          if (!forceRefresh && stored && isUsable(stored)) {
             const message = error instanceof Error ? error.message : String(error);
-            console.warn(`[dhan-auth] TOTP unavailable (${message}); using DHAN_ACCESS_TOKEN`);
-            return envToken;
+            console.warn(`[dhan-auth] TOTP unavailable (${message}); keeping stored token`);
+            return stored.accessToken;
           }
           throw error;
         })
@@ -420,16 +441,18 @@ export type AuthStatus = {
 export function getAuthStatus(): AuthStatus {
   const stored = readStored();
   const envTokenPresent = Boolean(process.env.DHAN_ACCESS_TOKEN?.trim());
+  const storedOk = Boolean(stored?.accessToken && isUsable(stored));
+  const totpReady = hasTotpCreds();
   const left = stored ? msLeft(stored) : null;
   return {
-    connected: Boolean(stored?.accessToken) || envTokenPresent,
-    source: stored?.source ?? (envTokenPresent ? "env" : null),
+    connected: storedOk || (!totpReady && envTokenPresent),
+    source: storedOk ? stored?.source ?? null : !totpReady && envTokenPresent ? "env" : null,
     clientId: getClientId(),
     clientName: stored?.clientName ?? null,
     expiryTime: stored?.expiryTime ?? null,
     minutesLeft: left == null ? null : Math.round(left / 60_000),
     expired: stored ? !isUsable(stored) : false,
-    totpReady: hasTotpCreds(),
+    totpReady,
     envTokenPresent,
   };
 }
