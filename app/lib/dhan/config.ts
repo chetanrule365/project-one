@@ -54,6 +54,7 @@ async function dhanPostOnce<T>(
       "client-id": clientId,
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(45_000),
   });
 
   const payload = (await response.json()) as T;
@@ -67,13 +68,9 @@ export async function dhanPost<T>(
   const first = await dhanPostOnce<T>(path, body);
   if (first.status !== 401) return first;
 
-  invalidateAccessToken();
   try {
     await getAccessToken({ forceRefresh: true });
-  } catch (error) {
-    if (error instanceof DhanApiError || error instanceof DhanConfigError) {
-      throw error;
-    }
+  } catch {
     return first;
   }
 
@@ -85,65 +82,90 @@ export async function dhanPost<T>(
   return retry;
 }
 
-/** Dhan option-chain / charts endpoints allow ~1 request / 3s. Serialize + space them out. */
+/** Dhan allows ~1 request / 3s across Data APIs. One queue; UI jumps bulk jobs. */
 const OPTION_CHAIN_GAP_MS = 3_200;
+const DHAN_429_RETRIES = 5;
+
+type DhanWaiter = { priority: number; id: number; resume: () => void };
+
 const globalRateLimit = globalThis as typeof globalThis & {
-  __dhanGates?: Record<
-    string,
-    { gate: Promise<void>; nextAt: number }
-  >;
+  __dhanQueue?: {
+    nextAt: number;
+    running: boolean;
+    seq: number;
+    waiters: DhanWaiter[];
+  };
 };
+
+function queueState() {
+  return (globalRateLimit.__dhanQueue ??= {
+    nextAt: 0,
+    running: false,
+    seq: 0,
+    waiters: [],
+  });
+}
 
 async function wait(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function kickQueue() {
+  const q = queueState();
+  if (q.running || q.waiters.length === 0) return;
+  q.waiters.sort((a, b) => b.priority - a.priority || a.id - b.id);
+  const next = q.waiters.shift();
+  if (!next) return;
+  q.running = true;
+  next.resume();
+}
+
+async function acquireDhanSlot(priority: number) {
+  const q = queueState();
+  await new Promise<void>((resume) => {
+    q.waiters.push({ priority, id: q.seq++, resume });
+    kickQueue();
+  });
+  const delay = q.nextAt - Date.now();
+  if (delay > 0) await wait(delay);
+}
+
+function releaseDhanSlot(gapMs: number) {
+  const q = queueState();
+  q.nextAt = Date.now() + gapMs;
+  q.running = false;
+  kickQueue();
 }
 
 export async function dhanOptionChainPost<T>(
   path: string,
   body: unknown,
 ): Promise<{ status: number; payload: T }> {
-  return dhanRateLimitedPost(path, body, "optionchain");
+  return dhanRateLimitedPost(path, body);
 }
 
-/** Generic rate-limited POST (charts / rollingoption share a gate). */
+/** Generic rate-limited POST. `rollingoption` is bulk (live pages skip the line). */
 export async function dhanRateLimitedPost<T>(
   path: string,
   body: unknown,
-  gateKey: string,
+  gateKey = "dhan",
   gapMs = OPTION_CHAIN_GAP_MS,
 ): Promise<{ status: number; payload: T }> {
-  const gates = (globalRateLimit.__dhanGates ??= {});
-  const existing = gates[gateKey] ?? { gate: Promise.resolve(), nextAt: 0 };
-  const previous = existing.gate;
-
-  let release!: () => void;
-  const nextGate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  gates[gateKey] = { gate: previous.then(() => nextGate), nextAt: existing.nextAt };
-
-  await previous;
-
-  try {
-    const delay = (gates[gateKey]?.nextAt ?? 0) - Date.now();
-    if (delay > 0) await wait(delay);
-
-    let attempt = 0;
-    while (true) {
-      const result = await dhanPost<T>(path, body);
-      if (gates[gateKey]) {
-        gates[gateKey].nextAt = Date.now() + gapMs;
-      }
-
-      if (result.status !== 429 || attempt >= 2) {
-        return result;
-      }
-
-      attempt += 1;
-      await wait(gapMs);
+  const priority = gateKey === "rollingoption" || gateKey === "bulk" ? 0 : 1;
+  let attempt = 0;
+  while (true) {
+    await acquireDhanSlot(priority);
+    let result: { status: number; payload: T };
+    try {
+      result = await dhanPost<T>(path, body);
+    } finally {
+      releaseDhanSlot(gapMs);
     }
-  } finally {
-    release();
+    if (result.status !== 429 || attempt >= DHAN_429_RETRIES) {
+      return result;
+    }
+    attempt += 1;
+    await wait(gapMs * attempt);
   }
 }
 

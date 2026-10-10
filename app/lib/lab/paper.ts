@@ -3,10 +3,10 @@ import { loadOptionChainPage } from "../dhan/option-chain";
 import { fetchIndexQuotes, fetchPriorSessionStats } from "../dhan/quotes";
 import {
   getStrategy,
-  listStrategies,
   pickPlaybookPath,
 } from "../strategies/registry";
 import { isPmSrReversal } from "../strategies/pm-sr-reversal";
+import { isProjectOne, PROJECT_ONE_ID } from "../strategies/project-one";
 import {
   buildLiveDayStructure,
   chainAroundAtm,
@@ -25,8 +25,8 @@ import {
   istClock,
   lotSizeFor,
   MORNING_PLAYBOOK_WINDOW,
-  type Strategy,
   type OpenPosition,
+  type Strategy,
 } from "../strategies/types";
 import { decidePaperExit } from "./paper-exit";
 import {
@@ -77,7 +77,7 @@ export function marginConsumedInr(trade: {
   if (trade.spot_entry) {
     return trade.spot_entry * lot * IC_SPAN_NOTIONAL_FRAC;
   }
-  const debit = trade.credit < 0 || trade.strategy_id === "ORB_ATM" || trade.strategy_id === "MAX_PAIN_REV";
+  const debit = trade.credit < 0;
   if (debit) return Math.abs(trade.credit) * lot;
   return Math.max(0, trade.width - trade.credit) * lot;
 }
@@ -158,14 +158,14 @@ export function getLivePaperTrades() {
   return { trades, totalPnlInr, asOf };
 }
 
-/** Always-on paper: one AUTO run per index. No start/stop required. */
+/** Always-on paper: one Project One run per index. No start/stop required. */
 export function ensureAlwaysOnPaperRuns() {
   const active = listActiveRuns();
   for (const instrument of INDEX_INSTRUMENTS) {
     if (!active.some((run) => run.instrument_id === instrument.id)) {
       startPaperRun({
         instrumentId: instrument.id,
-        strategyId: "AUTO",
+        strategyId: PROJECT_ONE_ID,
         widthSteps: DEFAULT_WIDTH_STEPS,
       });
     }
@@ -184,10 +184,9 @@ export function startPaper(input: {
 
  
 function resolveStrategies(strategyId: string): Strategy[] {
-  if (strategyId === "AUTO" || strategyId === "BOTH") {
-    return listStrategies();
-  }
-  const strategy = getStrategy(strategyId);
+  const strategy = getStrategy(
+    isProjectOne(strategyId) ? PROJECT_ONE_ID : strategyId,
+  );
   return strategy ? [strategy] : [];
 }
 
@@ -204,7 +203,8 @@ function istDayFromStamp(value: string) {
 function hasPmReversalToday(runId: number, today: string) {
   return listTradesForRun(runId).some(
     (trade) =>
-      isPmSrReversal(trade.strategy_id) &&
+      (isPmSrReversal(trade.strategy_id) ||
+        (isProjectOne(trade.strategy_id) && (trade.entry_hour ?? 0) >= 14)) &&
       istDayFromStamp(trade.entry_at) === today,
   );
 }
@@ -403,25 +403,9 @@ export async function syncPaper(run?: PaperRun): Promise<{
 
     const pmTaken = hasPmReversalToday(active.id, today);
     const picked =
-      active.strategy_id === "AUTO" || active.strategy_id === "BOTH"
-        ? pickPlaybookPath(
-            ctx,
-            pmTaken
-              ? strategies
-                  .map((strategy) => strategy.id)
-                  .filter((id) => !isPmSrReversal(id))
-              : undefined,
-          )
-        : (() => {
-            const strategy = strategies[0];
-            if (!strategy) return null;
-            if (pmTaken && isPmSrReversal(strategy.id)) return null;
-            if (!strategy.isEligible(ctx)) return null;
-            const proposal = strategy.proposeEntry(ctx);
-            return proposal
-              ? { strategy, proposal, reason: "Single strategy" }
-              : null;
-          })();
+      pmTaken && inPmReversalEntryWindow(hour, minute)
+        ? null
+        : pickPlaybookPath(ctx);
 
     if (picked) {
       opened = insertOpenTrade({
@@ -461,7 +445,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
             ? "Open paper trade is still active."
             : hasPmReversalToday(active.id, today) &&
                 inPmReversalEntryWindow(hour, minute)
-              ? "Afternoon S/R already taken today."
+              ? "Project One afternoon slot already used today."
               : "No playbook signal for current structure — sitting out.";
 
   return { run: active, opened, closed, message };

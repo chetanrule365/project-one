@@ -15,18 +15,13 @@ import {
 } from "./types";
 import { atmIndex, strikeKey } from "./common";
 
-/** IST calendar day + hour from unix seconds. */
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+/** IST calendar day + hour from unix seconds. IST has no DST. */
 export function istParts(timestampSec: number) {
-  const d = new Date(timestampSec * 1000);
-  const day = d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-  const hour = Number(
-    d.toLocaleTimeString("en-GB", {
-      timeZone: "Asia/Kolkata",
-      hour: "2-digit",
-      hour12: false,
-    }).slice(0, 2),
-  );
-  return { day, hour };
+  const ist = new Date(timestampSec * 1000 + IST_OFFSET_MS);
+  const day = `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, "0")}-${String(ist.getUTCDate()).padStart(2, "0")}`;
+  return { day, hour: ist.getUTCHours() };
 }
 
 export function istWeekday(day: string) {

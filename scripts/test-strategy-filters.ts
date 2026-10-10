@@ -93,7 +93,7 @@ const checks = [
   dailyOrbProposal !== null,
   dailyOrbProposal?.legs.length === 2,
   (dailyOrbProposal?.maxLoss ?? 0) < 180,
-  pickPlaybookPath(dailyOrb)?.strategy.id === "ORB_ATM",
+  pickPlaybookPath(dailyOrb)?.strategy.id === "PROJECT_ONE",
   !pmSrReversalStrategy.isEligible(ctx({ hour: 10 })),
   !pmSrReversalStrategy.isEligible(ctx({ hour: 14, minute: 20 })),
   !pmSrReversalStrategy.isEligible(
@@ -150,7 +150,28 @@ const checks = [
         orbBrokenDown: false,
       }),
     }),
-  )?.strategy.id === "PM_SR_REVERSAL",
+  )?.strategy.id === "PROJECT_ONE",
+  pickPlaybookPath(
+    ctx({
+      hour: 14,
+      minute: 8,
+      spot: 77620,
+      premiums: {
+        "ATM:CE": 120,
+        "ATM+2:CE": 40,
+        "ATM:PE": 90,
+        "ATM-2:PE": 30,
+      },
+      strikes: { ATM: 77600, "ATM+2": 77800, "ATM-2": 77400 },
+      structure: structure({
+        putOiSupport: 77600,
+        morningLow: 77610,
+        priorLow: 77600,
+        sessionLow: 77610,
+        orbBrokenDown: false,
+      }),
+    }),
+  )?.proposal.primaryLongSide === "PE",
   isIstTradingWeekday("2026-08-14") === true,
   isIstTradingWeekday("2026-08-15") === false,
 ];

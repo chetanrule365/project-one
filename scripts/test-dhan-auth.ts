@@ -129,7 +129,7 @@ try {
   process.env.DHAN_ACCESS_TOKEN = "ENV_DEAD";
   const hitsBefore = generateHits;
   await assert.rejects(
-    auth.getAccessToken(),
+    auth.getAccessToken({ forceRefresh: true }),
     /Invalid Pin/,
     "surfaces Dhan invalid pin instead of env fallback",
   );

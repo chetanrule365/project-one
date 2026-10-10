@@ -91,8 +91,7 @@ export function StrategyCards({
               Playbook
             </h2>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              Morning Playbook 10:00–14:00 · Afternoon S/R Reversal 14:00–14:15
-              (flat 15:15)
+              Project One · 10:00–14:00 and 14:00–14:15 IST (flat 15:15)
             </p>
           </div>
 

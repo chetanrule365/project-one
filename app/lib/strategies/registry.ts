@@ -5,8 +5,13 @@ import { oiRangeFadeStrategy, OI_FADE_DEFAULTS } from "./oi-range-fade";
 import {
   pmSrReversalStrategy,
   PM_SR_DEFAULTS,
-  PM_SR_REVERSAL_ID,
 } from "./pm-sr-reversal";
+import {
+  PROJECT_ONE_ID,
+  isProjectOne,
+  projectOneDefaults,
+  projectOneStrategy,
+} from "./project-one";
 import {
   FLAT_BY_HOUR,
   STOP_LOSS_CREDIT_MULT,
@@ -51,7 +56,9 @@ export type PlaybookSnapshot = {
   }>;
 };
 
-const STRATEGIES: Strategy[] = [
+const STRATEGIES: Strategy[] = [projectOneStrategy];
+
+const LEGACY_STRATEGIES: Strategy[] = [
   orbAtmStrategy,
   oiRangeFadeStrategy,
   ironCondorStrategy,
@@ -135,7 +142,9 @@ export function buildPlaybookSnapshot(
         primaryShortSide: "CE" as const,
         primaryLongSide: "CE" as const,
         available: false,
-        reason: eligible ? "Cannot build from current chain" : "Not eligible for current structure / clock",
+        reason: eligible
+          ? "No edge after costs — sitting out"
+          : "Outside the Project One window",
       };
     }
     return { ...proposal, id: strategy.id, available: true };
@@ -149,7 +158,7 @@ export function buildPlaybookSnapshot(
       ? `${weekdayLabel} — market closed. Sitting out.`
       : !inEntryWindow
         ? `Outside ${MORNING_PLAYBOOK_WINDOW} and 14:00–14:15 IST. Sitting out.`
-        : "No setup matches current structure.";
+        : "Project One has no edge here — sitting out.";
 
   const path = STRATEGIES.map((strategy) => {
     const card = spreads.find((s) => s.id === strategy.id);
@@ -176,46 +185,27 @@ export function pickExpiryPath(ctx: EntryContext, strategyIds?: string[]) {
   return pickPlaybookPath(ctx, strategyIds);
 }
 
-const EXPIRY_ORDER = [
-  PM_SR_REVERSAL_ID,
-  "IRON_CONDOR",
-  "OI_RANGE_FADE",
-  "MAX_PAIN_REV",
-  "ORB_ATM",
-];
-const DAILY_ORDER = [
-  PM_SR_REVERSAL_ID,
-  "ORB_ATM",
-  "IRON_CONDOR",
-  "OI_RANGE_FADE",
-  "MAX_PAIN_REV",
-];
-
-export function pickPlaybookPath(ctx: EntryContext, strategyIds?: string[]): { strategy: Strategy; proposal: TradeProposal; reason: string } | null {
-  const allowed = strategyIds?.length ? STRATEGIES.filter((s) => strategyIds.includes(s.id)) : STRATEGIES;
-  const order = ctx.expirySession !== false ? EXPIRY_ORDER : DAILY_ORDER;
-  for (const id of order) {
-    const strategy = allowed.find((s) => s.id === id);
-    if (!strategy) continue;
-    if (!strategy.isEligible(ctx)) continue;
-    const proposal = strategy.proposeEntry(ctx);
-    if (!proposal) continue;
-    const reason =
-      id === PM_SR_REVERSAL_ID
-        ? proposal.description
-        : id === "ORB_ATM"
-          ? `ORB ${ctx.structure.orbBrokenUp ? "up" : "down"} → ATM buy`
-          : id === "IRON_CONDOR"
-            ? "Quiet range → Iron Condor"
-            : id === "MAX_PAIN_REV"
-              ? `Max pain ${ctx.structure.maxPain} (${Math.round(ctx.structure.distToMaxPain ?? 0)} pts) → reversion`
-              : "Near OI wall → range fade";
-    return { strategy, proposal, reason };
-  }
-  return null;
+export function autoPlaybookStrategyIds() {
+  return [PROJECT_ONE_ID];
 }
 
-export function positionDefaults(strategyId: string, _expirySession?: boolean): Partial<OpenPosition> {
+export function pickPlaybookPath(
+  ctx: EntryContext,
+  _strategyIds?: string[],
+): { strategy: Strategy; proposal: TradeProposal; reason: string } | null {
+  const strategy = projectOneStrategy;
+  if (!strategy.isEligible(ctx)) return null;
+  const proposal = strategy.proposeEntry(ctx);
+  if (!proposal) return null;
+  return { strategy, proposal, reason: proposal.description };
+}
+
+export function positionDefaults(
+  strategyId: string,
+  _expirySession?: boolean,
+  opts?: { credit?: number; hour?: number },
+): Partial<OpenPosition> {
+  if (isProjectOne(strategyId)) return projectOneDefaults(opts);
   switch (strategyId) {
     case "IRON_CONDOR":
       return { ...IC_DEFAULTS, flatByHour: FLAT_BY_HOUR };
@@ -233,7 +223,11 @@ export function positionDefaults(strategyId: string, _expirySession?: boolean): 
 }
 
 export function getStrategy(id: string) {
-  return STRATEGIES.find((s) => s.id === id);
+  if (isProjectOne(id)) return projectOneStrategy;
+  return (
+    STRATEGIES.find((s) => s.id === id) ??
+    LEGACY_STRATEGIES.find((s) => s.id === id)
+  );
 }
 
 export function listStrategies() {

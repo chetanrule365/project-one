@@ -1,7 +1,6 @@
 import {
   DhanApiError,
   DhanConfigError,
-  dhanPost,
   dhanRateLimitedPost,
   isDhanSandbox,
 } from "./config";
@@ -166,7 +165,7 @@ export async function fetchPriorSessionStats(
 }
 
 async function fetchQuotesFromMarketfeed(): Promise<IndexQuote[]> {
-  const { status, payload } = await dhanPost<OhlcResponse>(
+  const { status, payload } = await dhanRateLimitedPost<OhlcResponse>(
     "/v2/marketfeed/ohlc",
     {
       IDX_I: INDEX_INSTRUMENTS.map((instrument) => instrument.securityId),

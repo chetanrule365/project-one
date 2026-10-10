@@ -395,12 +395,16 @@ export async function getAccessToken(options?: {
 
   if (!forceRefresh && stored && isFresh(stored)) return stored.accessToken;
 
+  if (stored?.accessToken && readCooldown()) {
+    return stored.accessToken;
+  }
+
   if (hasTotpCreds()) {
     if (!mem.inflight) {
       mem.inflight = generateViaTotp()
         .then((auth) => auth.accessToken)
         .catch((error) => {
-          if (!forceRefresh && stored && isUsable(stored)) {
+          if (stored?.accessToken) {
             const message = error instanceof Error ? error.message : String(error);
             console.warn(`[dhan-auth] TOTP unavailable (${message}); keeping stored token`);
             return stored.accessToken;

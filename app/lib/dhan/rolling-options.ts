@@ -111,16 +111,49 @@ function mapSide(
   return bars;
 }
 
+export type RollingProgress = {
+  done: number;
+  total: number;
+  cached: number;
+  fetched: number;
+  label: string;
+};
+
+function countSeriesChunks(from: Date, to: Date) {
+  let cursor = new Date(
+    Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()),
+  );
+  const end = new Date(
+    Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate()),
+  );
+  let n = 0;
+  while (cursor < end) {
+    n += 1;
+    const chunkEnd = addDays(cursor, 30);
+    cursor = chunkEnd < end ? chunkEnd : end;
+  }
+  return n;
+}
+
+export function countRollingChunks(
+  strikeKeys: string[],
+  rights: Array<"CALL" | "PUT">,
+  from: Date,
+  to: Date,
+) {
+  return strikeKeys.length * rights.length * countSeriesChunks(from, to);
+}
+
 async function fetchRollingChunk(
   instrument: IndexInstrument,
   strikeKey: string,
   right: "CALL" | "PUT",
   fromDate: string,
   toDate: string,
-): Promise<RollingBar[]> {
+): Promise<{ bars: RollingBar[]; cached: boolean }> {
   const file = cachePath(instrument, strikeKey, right, fromDate, toDate);
   const cached = await readCache(file);
-  if (cached) return cached;
+  if (cached) return { bars: cached, cached: true };
 
   const { status, payload } = await dhanRateLimitedPost<RollingPayload>(
     "/v2/charts/rollingoption",
@@ -164,7 +197,7 @@ async function fetchRollingChunk(
     right === "CALL" ? mapSide(payload.data?.ce ?? undefined) : mapSide(payload.data?.pe ?? undefined);
 
   await writeCache(file, bars);
-  return bars;
+  return { bars, cached: false };
 }
 
 /** Merge bars by timestamp (later chunk overwrites). */
@@ -182,6 +215,7 @@ export async function fetchRollingSeries(
   right: "CALL" | "PUT",
   from: Date,
   to: Date,
+  onChunk?: (info: { cached: boolean; label: string }) => void,
 ): Promise<RollingBar[]> {
   const chunks: RollingBar[][] = [];
   let cursor = new Date(
@@ -194,13 +228,19 @@ export async function fetchRollingSeries(
   while (cursor < end) {
     const chunkEnd = addDays(cursor, 30);
     const toDate = chunkEnd < end ? chunkEnd : end;
-    const bars = await fetchRollingChunk(
+    const fromDate = formatDate(cursor);
+    const toLabel = formatDate(toDate);
+    const { bars, cached } = await fetchRollingChunk(
       instrument,
       strikeKey,
       right,
-      formatDate(cursor),
-      formatDate(toDate),
+      fromDate,
+      toLabel,
     );
+    onChunk?.({
+      cached,
+      label: `${instrument.id} ${strikeKey} ${right} ${fromDate}→${toLabel}`,
+    });
     chunks.push(bars);
     cursor = toDate;
   }
@@ -214,7 +254,19 @@ export async function fetchRollingBundle(
   rights: Array<"CALL" | "PUT">,
   from: Date,
   to: Date,
+  onProgress?: (progress: RollingProgress) => void,
 ) {
+  const total = countRollingChunks(strikeKeys, rights, from, to);
+  let done = 0;
+  let cached = 0;
+  let fetched = 0;
+  onProgress?.({
+    done: 0,
+    total,
+    cached: 0,
+    fetched: 0,
+    label: `Reading cache 0/${total}`,
+  });
   const series: Record<string, RollingBar[]> = {};
   for (const strikeKey of strikeKeys) {
     for (const right of rights) {
@@ -225,20 +277,30 @@ export async function fetchRollingBundle(
         right,
         from,
         to,
+        (info) => {
+          done += 1;
+          if (info.cached) cached += 1;
+          else fetched += 1;
+          onProgress?.({ done, total, cached, fetched, label: info.label });
+        },
       );
     }
   }
   return series;
 }
 
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+function istDay(timestampSec: number) {
+  const ist = new Date(timestampSec * 1000 + IST_OFFSET_MS);
+  return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, "0")}-${String(ist.getUTCDate()).padStart(2, "0")}`;
+}
+
 /** Collapse hourly bars to one bar per IST calendar day (last bar of day). */
 export function toDailyBars(bars: RollingBar[]) {
   const byDay = new Map<string, RollingBar>();
   for (const bar of bars) {
-    const day = new Date(bar.timestamp * 1000).toLocaleDateString("en-CA", {
-      timeZone: "Asia/Kolkata",
-    });
-    byDay.set(day, bar);
+    byDay.set(istDay(bar.timestamp), bar);
   }
   return [...byDay.entries()]
     .sort(([a], [b]) => a.localeCompare(b))

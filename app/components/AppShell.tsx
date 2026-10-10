@@ -1,14 +1,24 @@
 import { useEffect, useId, useState } from "react";
-import { NavLink, useLocation } from "react-router";
+import { useLocation, useNavigation } from "react-router";
 
 const links = [
   { to: "/", label: "Market Watch", hint: "Live index quotes", end: true },
   { to: "/strategies", label: "Playbook", hint: "Live setups", end: false },
   { to: "/paper", label: "Paper", hint: "Simulated trades", end: false },
-  { to: "/backtesting", label: "Backtesting", hint: "Historical runs", end: false },
+  {
+    to: "/backtesting",
+    label: "Backtesting",
+    hint: "Historical runs",
+    end: false,
+  },
   { to: "/option-chain", label: "Option Chain", hint: "Strikes and OI", end: false },
   { to: "/settings", label: "Settings", hint: "Dhan token", end: false },
 ] as const;
+
+function isActivePath(pathname: string, link: (typeof links)[number]) {
+  if (link.end) return pathname === link.to;
+  return pathname === link.to || pathname.startsWith(`${link.to}/`);
+}
 
 function MenuIcon({ open }: { open: boolean }) {
   return (
@@ -37,7 +47,9 @@ function MenuIcon({ open }: { open: boolean }) {
   );
 }
 
-function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
+function SidebarNav() {
+  const { pathname } = useLocation();
+
   return (
     <nav className="flex h-full flex-col">
       <div className="border-b border-slate-200 px-4 py-4 dark:border-slate-800">
@@ -47,37 +59,32 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
         <p className="mt-0.5 text-[11px] text-slate-500">Index lab</p>
       </div>
       <ul className="flex-1 space-y-1 p-3">
-        {links.map((link) => (
-          <li key={link.to}>
-            <NavLink
-              to={link.to}
-              end={link.end}
-              onClick={onNavigate}
-              className={({ isActive }) =>
-                `block rounded-xl px-3 py-2.5 transition ${
+        {links.map((link) => {
+          const isActive = isActivePath(pathname, link);
+          return (
+            <li key={link.to}>
+              <a
+                href={link.to}
+                className={`block cursor-pointer rounded-xl px-3 py-2.5 ${
                   isActive
                     ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
                     : "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-                }`
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <span className="block text-sm font-medium">{link.label}</span>
-                  <span
-                    className={`mt-0.5 block text-[11px] ${
-                      isActive
-                        ? "text-white/70 dark:text-slate-500"
-                        : "text-slate-400"
-                    }`}
-                  >
-                    {link.hint}
-                  </span>
-                </>
-              )}
-            </NavLink>
-          </li>
-        ))}
+                }`}
+              >
+                <span className="block text-sm font-medium">{link.label}</span>
+                <span
+                  className={`mt-0.5 block text-[11px] ${
+                    isActive
+                      ? "text-white/70 dark:text-slate-500"
+                      : "text-slate-400"
+                  }`}
+                >
+                  {link.hint}
+                </span>
+              </a>
+            </li>
+          );
+        })}
       </ul>
     </nav>
   );
@@ -86,7 +93,9 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const location = useLocation();
+  const navigation = useNavigation();
   const panelId = useId();
+  const pending = navigation.state !== "idle";
 
   useEffect(() => {
     setOpen(false);
@@ -107,7 +116,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [open]);
 
   return (
-    <div className="min-h-screen md:pl-60">
+    <div className="min-h-screen">
+      {pending ? (
+        <div className="fixed top-0 right-0 left-0 z-[200] h-0.5 bg-sky-500" />
+      ) : null}
+
       <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-slate-200 bg-white/90 px-3 py-3 backdrop-blur md:hidden dark:border-slate-800 dark:bg-gray-950/90">
         <button
           type="button"
@@ -124,10 +137,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </p>
       </header>
 
+      <aside className="pointer-events-auto fixed inset-y-0 left-0 z-[100] hidden w-60 border-r border-slate-200 bg-white md:block dark:border-slate-800 dark:bg-gray-950">
+        <SidebarNav />
+      </aside>
+
       {open ? (
         <button
           type="button"
-          className="fixed inset-0 z-40 bg-slate-950/40 md:hidden"
+          className="fixed inset-0 z-[90] bg-slate-950/40 md:hidden"
           aria-label="Close menu"
           onClick={() => setOpen(false)}
         />
@@ -135,14 +152,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <aside
         id={panelId}
-        className={`fixed inset-y-0 left-0 z-50 w-60 border-r border-slate-200 bg-white transition-transform duration-200 dark:border-slate-800 dark:bg-gray-950 ${
-          open ? "translate-x-0" : "-translate-x-full"
-        } md:translate-x-0`}
+        className={`fixed inset-y-0 left-0 z-[100] w-60 border-r border-slate-200 bg-white md:hidden dark:border-slate-800 dark:bg-gray-950 ${
+          open ? "translate-x-0" : "pointer-events-none -translate-x-full"
+        }`}
       >
-        <SidebarNav onNavigate={() => setOpen(false)} />
+        <SidebarNav />
       </aside>
 
-      {children}
+      <div className="relative z-0 md:pl-60">{children}</div>
     </div>
   );
 }

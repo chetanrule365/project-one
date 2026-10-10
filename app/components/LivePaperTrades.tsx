@@ -132,9 +132,8 @@ export function LivePaperTrades({
 
       {trades.length === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-          No live paper trades right now. Morning Playbook 10:00–14:00 IST;
-          Afternoon S/R Reversal 14:00–14:15.
-          on each index&apos;s expiry.
+          No live paper trades right now. Project One trades 10:00–14:00 IST
+          and 14:00–14:15.
         </p>
       ) : (
         <>

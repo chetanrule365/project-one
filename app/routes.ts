@@ -8,6 +8,7 @@ export default [
   route("option-chain", "routes/option-chain.tsx"),
   route("option-chain/:id", "routes/option-chain.$id.tsx"),
   route("settings", "routes/settings.tsx"),
+  route("api/backtest-job", "routes/api.backtest-job.ts"),
   route("api/market-feed", "routes/api.market-feed.ts"),
   route("api/live-trades", "routes/api.live-trades.ts"),
   route("api/paper-trades.csv", "routes/api.paper-trades-export.ts"),

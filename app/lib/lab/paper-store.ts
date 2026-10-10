@@ -294,7 +294,7 @@ export function listAllTradesWithInstrument(): PaperTradeExportRow[] {
     if (typeof trade.spot_entry === "number" && Number.isFinite(trade.spot_entry)) {
       margin = trade.spot_entry * lot * IC_SPAN_NOTIONAL_FRAC;
     } else {
-      const debit = trade.credit < 0 || trade.strategy_id === "ORB_ATM" || trade.strategy_id === "MAX_PAIN_REV";
+      const debit = trade.credit < 0;
       margin = debit ? Math.abs(trade.credit) * lot : Math.max(0, trade.width - trade.credit) * lot;
     }
     return {

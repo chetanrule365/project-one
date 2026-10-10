@@ -117,8 +117,8 @@ export default function StrategiesPage(props: Route.ComponentProps) {
         <header className="mb-4 sm:mb-6">
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl dark:text-white">Playbook</h1>
           <p className="mt-1.5 max-w-2xl text-sm leading-snug text-slate-500 dark:text-slate-400">
-            Morning Playbook 10:00–14:00 IST, then Afternoon S/R Reversal 14:00–14:15
-            (flat 15:15). Simulation only — no real orders. {" "}
+            Project One: follow a break, sell only fat credits, sit otherwise.
+            10:00–14:00 and 14:00–14:15 IST. Simulation only — no real orders. {" "}
             <Link to="/paper" className="font-medium text-sky-700 underline-offset-2 hover:underline dark:text-sky-300">Paper trades</Link>
           </p>
         </header>

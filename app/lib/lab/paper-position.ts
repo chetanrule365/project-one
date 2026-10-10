@@ -104,6 +104,7 @@ export function positionFromTrade(trade: PaperTrade): OpenPosition {
       typeof trade.expiry_session === "boolean"
         ? trade.expiry_session
         : trade.expiry_at === trade.entry_at,
+      { credit: trade.credit, hour: trade.entry_hour ?? undefined },
     ),
   };
 }

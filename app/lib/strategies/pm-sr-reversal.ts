@@ -83,13 +83,13 @@ export function pmReversalSignal(ctx: EntryContext): {
     const dr = Math.abs(ctx.spot - resistance);
     if (Math.abs(ds - dr) < strikeStepPts(ctx.instrument.id) * 0.25) return null;
     return ds < dr
-      ? { direction: "up", level: support, kind: "support" }
-      : { direction: "down", level: resistance, kind: "resistance" };
+      ? { direction: "down", level: support, kind: "support" }
+      : { direction: "up", level: resistance, kind: "resistance" };
   }
   if (support != null) {
-    return { direction: "up", level: support, kind: "support" };
+    return { direction: "down", level: support, kind: "support" };
   }
-  return { direction: "down", level: resistance!, kind: "resistance" };
+  return { direction: "up", level: resistance!, kind: "resistance" };
 }
 
 function spreadSteps(ctx: EntryContext) {
@@ -97,16 +97,16 @@ function spreadSteps(ctx: EntryContext) {
 }
 
 /**
- * Afternoon S/R reversal — 14:00–14:15 IST only.
- * If ATM / spot is on put support or call resistance (or prior / morning S/R),
- * fade: buy ATM call at support, ATM put at resistance. Flatten 15:15.
+ * Afternoon S/R break — 14:00–14:15 IST only.
+ * Same tag as the old fade, opposite trade: buy ATM put at support (breakdown),
+ * ATM call at resistance (breakout). Flatten 15:15.
  */
 export const pmSrReversalStrategy = assertStrategy({
   id: PM_SR_REVERSAL_ID,
-  name: "Afternoon S/R Reversal",
-  bias: "Fade afternoon S/R",
+  name: "Afternoon S/R Break",
+  bias: "Break afternoon S/R",
   description:
-    "14:00–14:15 IST: if the current strike is on support or resistance, take the reversal (ATM debit spread). Flat by 15:15.",
+    "14:00–14:15 IST: if the current strike is on support or resistance, trade the break (ATM debit spread). Flat by 15:15.",
   requiredStrikeKeys(widthSteps) {
     const steps = Math.max(1, widthSteps);
     return [strikeKey(-steps), strikeKey(0), strikeKey(steps)];
@@ -141,9 +141,9 @@ export const pmSrReversalStrategy = assertStrategy({
       const width = Math.abs(shortRow.strike - longRow.strike);
       return buildProposal({
         strategyId: PM_SR_REVERSAL_ID,
-        name: "Afternoon S/R Reversal",
-        bias: up ? "Bounce from support" : "Reject from resistance",
-        description: `ATM ${right} debit fade ${label} ${Math.round(signal.level)}`,
+        name: "Afternoon S/R Break",
+        bias: up ? "Break through resistance" : "Break through support",
+        description: `ATM ${right} debit break ${label} ${Math.round(signal.level)}`,
         legs: [
           {
             right,
@@ -184,9 +184,9 @@ export const pmSrReversalStrategy = assertStrategy({
     const width = Math.abs(shortStrike - longStrike);
     return buildProposal({
       strategyId: PM_SR_REVERSAL_ID,
-      name: "Afternoon S/R Reversal",
-      bias: up ? "Bounce from support" : "Reject from resistance",
-      description: `ATM ${right} debit fade ${label} ${Math.round(signal.level)}`,
+      name: "Afternoon S/R Break",
+      bias: up ? "Break through resistance" : "Break through support",
+      description: `ATM ${right} debit break ${label} ${Math.round(signal.level)}`,
       legs: [
         { right, strike: longStrike, strikeKey: longKey, qty: 1, premium: longPx },
         { right, strike: shortStrike, strikeKey: shortKey, qty: -1, premium: shortPx },

@@ -27,7 +27,10 @@ export function decidePaperExit(input: {
   const pastExpiry = input.today > expiryDay;
   const expirySession =
     input.expirySession ?? (input.today === expiryDay || pastExpiry);
-  const defaults = positionDefaults(input.strategyId, expirySession);
+  const defaults = positionDefaults(input.strategyId, expirySession, {
+    credit: input.credit,
+    hour: input.entryHour ?? input.hour,
+  });
   const minute = input.minute ?? 0;
 
   const isDebit = input.credit < 0;
