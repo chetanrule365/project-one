@@ -28,20 +28,104 @@ export function istWeekday(day: string) {
   return new Date(`${day}T12:00:00+05:30`).getDay();
 }
 
+/** Bank Nifty listed monthly options only (last Tuesday). Nifty/Sensex stay weekly. */
+export function isMonthlyExpiryIndex(instrumentId: string) {
+  return instrumentId === "BANKNIFTY";
+}
+
 /**
  * Weekly expiry weekday (IST).
- * Nifty: Tuesday. Sensex: Thursday. BankNifty: last Tuesday (monthly) — treat Tuesday.
+ * Nifty: Tuesday. Sensex: Thursday. Bank Nifty: last Tuesday of the month.
  */
 export function expiryWeekday(instrumentId: string) {
   if (instrumentId === "SENSEX") return 4; // Thursday
-  return 2; // Tuesday — Nifty & BankNifty
+  return 2; // Tuesday — Nifty weekly & Bank Nifty monthly
 }
 
-/** 0 = expiry weekday, 1 = day before, … 6 = day after. */
-export function daysToWeeklyExpiry(instrumentId: string, day: string) {
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+function istDay(year: number, month: number, date: number) {
+  return `${year}-${pad2(month)}-${pad2(date)}`;
+}
+
+function parseIstDay(day: string) {
+  const [year, month, date] = day.split("-").map(Number);
+  return { year, month, date };
+}
+
+function calendarDaysBetween(fromDay: string, toDay: string) {
+  const from = new Date(`${fromDay}T12:00:00+05:30`).getTime();
+  const to = new Date(`${toDay}T12:00:00+05:30`).getTime();
+  return Math.round((to - from) / 86_400_000);
+}
+
+function addCalendarDays(day: string, days: number) {
+  const date = new Date(`${day}T12:00:00+05:30`);
+  date.setTime(date.getTime() + days * 86_400_000);
+  return date.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+}
+
+/** Last Tuesday of a calendar month (month is 1–12). */
+export function lastTuesdayOfMonth(year: number, month: number): string {
+  const lastDate = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  for (let date = lastDate; date >= 1; date -= 1) {
+    const day = istDay(year, month, date);
+    if (istWeekday(day) === 2) return day;
+  }
+  return istDay(year, month, lastDate);
+}
+
+function addMonth(year: number, month: number) {
+  if (month === 12) return { year: year + 1, month: 1 };
+  return { year, month: month + 1 };
+}
+
+/** Next scheduled expiry on or after `fromDay` (no holiday shift). */
+export function scheduledExpiryOnOrAfter(instrumentId: string, fromDay: string) {
+  if (isMonthlyExpiryIndex(instrumentId)) {
+    const { year, month } = parseIstDay(fromDay);
+    const thisMonth = lastTuesdayOfMonth(year, month);
+    if (fromDay <= thisMonth) return thisMonth;
+    const next = addMonth(year, month);
+    return lastTuesdayOfMonth(next.year, next.month);
+  }
   const target = expiryWeekday(instrumentId);
-  const current = istWeekday(day);
-  return (target - current + 7) % 7;
+  const daysAhead = (target - istWeekday(fromDay) + 7) % 7;
+  return addCalendarDays(fromDay, daysAhead);
+}
+
+function shiftExpiryIfHoliday(scheduled: string, availableDays?: string[]) {
+  if (!availableDays || availableDays.length === 0) return scheduled;
+  if (availableDays.includes(scheduled)) return scheduled;
+  for (let i = availableDays.length - 1; i >= 0; i -= 1) {
+    if (availableDays[i] < scheduled) return availableDays[i];
+  }
+  return scheduled;
+}
+
+/**
+ * Calendar days until the next expiry (0 = expiry day, 1 = day before).
+ * Bank Nifty uses last Tuesday of the month, not every Tuesday.
+ */
+export function daysToExpiry(
+  instrumentId: string,
+  day: string,
+  availableDays?: string[],
+) {
+  let scheduled = scheduledExpiryOnOrAfter(instrumentId, day);
+  let expiry = shiftExpiryIfHoliday(scheduled, availableDays);
+  if (expiry < day) {
+    scheduled = scheduledExpiryOnOrAfter(instrumentId, addCalendarDays(scheduled, 1));
+    expiry = shiftExpiryIfHoliday(scheduled, availableDays);
+  }
+  return Math.max(0, calendarDaysBetween(day, expiry));
+}
+
+/** @deprecated Use daysToExpiry — kept for weekly-era call sites. */
+export function daysToWeeklyExpiry(instrumentId: string, day: string) {
+  return daysToExpiry(instrumentId, day);
 }
 
 /**
@@ -49,12 +133,7 @@ export function daysToWeeklyExpiry(instrumentId: string, day: string) {
  * starting from `fromDay`. If `fromDay` itself is expiry day, returns `fromDay`.
  */
 export function nextExpiryDateIst(instrumentId: string, fromDay: string): string {
-  const target = expiryWeekday(instrumentId);
-  const date = new Date(`${fromDay}T12:00:00+05:30`);
-  const current = date.getDay();
-  const daysAhead = (target - current + 7) % 7; // 0 = today is expiry
-  if (daysAhead > 0) date.setDate(date.getDate() + daysAhead);
-  return date.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  return scheduledExpiryOnOrAfter(instrumentId, fromDay);
 }
 
 export function todayIst() {
@@ -88,7 +167,7 @@ export function expiryEqualsDay(expiry: string, day: string) {
 }
 
 export function isExpiryCalendarDay(instrumentId: string, day: string) {
-  return istWeekday(day) === expiryWeekday(instrumentId);
+  return scheduledExpiryOnOrAfter(instrumentId, day) === day;
 }
 
 /** Live playbook: true only if the selected chain expires today. */
@@ -112,6 +191,11 @@ export function isExpirySession(
   day: string,
   availableDays: string[],
 ) {
+  if (isMonthlyExpiryIndex(instrumentId)) {
+    const { year, month } = parseIstDay(day);
+    const scheduled = lastTuesdayOfMonth(year, month);
+    return shiftExpiryIfHoliday(scheduled, availableDays) === day;
+  }
   const target = expiryWeekday(instrumentId);
   if (istWeekday(day) === target) return true;
   // Holiday shift: day is previous available day before a missing target weekday

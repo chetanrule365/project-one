@@ -424,9 +424,10 @@ export default function BacktestingPage({
             Backtesting
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
-            Project One: sell credits only — expiry, day-before, and quiet
-            iron condors. Flatten by 14:00. Never buy premium. Results save to
-            MongoDB. No real orders.
+            Project One: sell credits only — expiry and day-before (Bank Nifty
+            last Tuesday of the month). Quiet iron condors on Nifty/Sensex.
+            Flatten by 14:00. Never buy premium. Results save to MongoDB. No
+            real orders.
           </p>
         </header>
 

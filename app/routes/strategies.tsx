@@ -66,6 +66,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       quote,
       instrument,
       prior,
+      chain.expiry,
     );
     expiry = chain.expiry;
     spot = chain.spot;
@@ -119,7 +120,7 @@ export default function StrategiesPage(props: Route.ComponentProps) {
         <header className="mb-4 sm:mb-6">
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl dark:text-white">Playbook</h1>
           <p className="mt-1.5 max-w-2xl text-sm leading-snug text-slate-500 dark:text-slate-400">
-            Project One: sell credits 10:00–14:00 IST (expiry, day-before, quiet days).
+            Project One: sell credits 10:00–14:00 IST (expiry + day-before; Bank Nifty last Tuesday only).
             Simulation only — no real orders. {" "}
             <Link to="/paper" className="font-medium text-sky-700 underline-offset-2 hover:underline dark:text-sky-300">Paper trades</Link>
           </p>

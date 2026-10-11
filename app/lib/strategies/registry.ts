@@ -30,8 +30,10 @@ import {
   chainAroundAtm,
   computeMaxPain,
   oiWalls,
+  daysToExpiry,
+  isMonthlyExpiryIndex,
   istWeekday,
-  expiryWeekday,
+  liveExpirySession,
 } from "./expiry-day";
 
 export type PlaybookCard = TradeProposal & {
@@ -72,6 +74,7 @@ export function buildPlaybookSnapshot(
   quote?: { open: number; high: number; low: number; prevClose: number },
   instrument: IndexInstrument = INDEX_INSTRUMENTS[0],
   prior?: { high: number; low: number; close: number } | null,
+  expiry?: string,
 ): PlaybookSnapshot {
   const subset = chainAroundAtm(rows, spot, 10);
   const maxPain = computeMaxPain(subset);
@@ -106,8 +109,9 @@ export function buildPlaybookSnapshot(
   const weekday = istWeekday(today);
   const weekdayLabel = new Date(`${today}T12:00:00+05:30`).toLocaleDateString("en-IN", { weekday: "long", timeZone: "Asia/Kolkata" });
   const isWeekend = weekday === 0 || weekday === 6;
-  const isExpiryDay = weekday === expiryWeekday(instrument.id);
+  const isExpiryDay = liveExpirySession(instrument.id, expiry);
   const inEntryWindow = !isWeekend && inMorningEntryWindow(hour);
+  const dte = daysToExpiry(instrument.id, today);
 
   const ctx: EntryContext = {
     instrument,
@@ -117,6 +121,7 @@ export function buildPlaybookSnapshot(
     minute,
     structure,
     rows: subset,
+    expirySession: isExpiryDay,
   };
 
   const spreads: PlaybookCard[] = STRATEGIES.map((strategy) => {
@@ -155,7 +160,9 @@ export function buildPlaybookSnapshot(
       ? `${weekdayLabel} — market closed. Sitting out.`
       : !inEntryWindow
         ? `Outside ${MORNING_PLAYBOOK_WINDOW} IST. Sitting out.`
-        : "Project One has no edge here — sitting out.";
+        : isMonthlyExpiryIndex(instrument.id) && dte > 1
+          ? "Bank Nifty monthly expiry — sitting until the last-Tuesday week."
+          : "Project One has no edge here — sitting out.";
 
   const path = STRATEGIES.map((strategy) => {
     const card = spreads.find((s) => s.id === strategy.id);

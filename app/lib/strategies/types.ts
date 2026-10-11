@@ -95,8 +95,9 @@ export type EntryContext = {
   /** Hourly bars for the session keyed by series */
   hourlyByKey?: Record<string, Array<{ hour: number; bar: RollingBar }>>;
   /**
-   * True when this session is the contract's expiry (weekly weekday / holiday shift).
-   * Undefined is treated as expiry for backward-compatible tests.
+   * True when this session is the contract's expiry (weekly weekday, Bank Nifty
+   * last Tuesday, or holiday shift). Undefined is treated as expiry for
+   * backward-compatible tests.
    */
   expirySession?: boolean;
 };

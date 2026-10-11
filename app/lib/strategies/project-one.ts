@@ -1,5 +1,5 @@
 import { proposalCoversCosts } from "./cost-filter";
-import { daysToWeeklyExpiry } from "./expiry-day";
+import { daysToExpiry, isMonthlyExpiryIndex } from "./expiry-day";
 import { ironCondorStrategy, IC_DEFAULTS } from "./iron-condor";
 import { oiRangeFadeStrategy, OI_FADE_DEFAULTS } from "./oi-range-fade";
 import { assertStrategy, settleLegs } from "./common";
@@ -27,7 +27,7 @@ function quietRange(ctx: EntryContext) {
 
 function sessionDte(ctx: EntryContext) {
   if (ctx.expirySession === true) return 0;
-  const cal = daysToWeeklyExpiry(ctx.instrument.id, ctx.structure.day);
+  const cal = daysToExpiry(ctx.instrument.id, ctx.structure.day);
   // Caller marked this as a non-expiry session (holiday/test) even on the
   // calendar weekday — don't treat it as 0DTE.
   if (ctx.expirySession === false && cal === 0) return 2;
@@ -77,7 +77,7 @@ function pickInner(ctx: EntryContext): TradeProposal | null {
       const condor = adopt(
         ctx,
         ironCondorStrategy.proposeEntry(ctx),
-        "Day-before iron condor — weekly still decaying",
+        "Day-before iron condor — still decaying",
       );
       if (condor) return condor;
     }
@@ -91,6 +91,7 @@ function pickInner(ctx: EntryContext): TradeProposal | null {
     return null;
   }
 
+  if (isMonthlyExpiryIndex(ctx.instrument.id)) return null;
   if (!quietRange(ctx) || !ironCondorStrategy.isEligible(ctx)) return null;
   return adopt(
     ctx,
@@ -104,7 +105,7 @@ export const projectOneStrategy = assertStrategy({
   name: "Project One",
   bias: "Credit theta / sit trend days",
   description:
-    "Sell credits only: expiry + day-before, and quiet iron condors on other mornings. Flatten by 14:00. Never buy premium.",
+    "Sell credits only: expiry + day-before (Bank Nifty: last Tuesday of the month). Quiet iron condors on Nifty/Sensex. Flatten by 14:00. Never buy premium.",
   requiredStrikeKeys(widthSteps) {
     return [
       ...new Set([
@@ -117,6 +118,7 @@ export const projectOneStrategy = assertStrategy({
     if (!inMorningEntryWindow(ctx.hour) || !noTrend(ctx)) return false;
     const dte = sessionDte(ctx);
     if (dte === 0 || dte === 1) return true;
+    if (isMonthlyExpiryIndex(ctx.instrument.id)) return false;
     return quietRange(ctx);
   },
   proposeEntry(ctx) {

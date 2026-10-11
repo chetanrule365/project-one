@@ -8,7 +8,7 @@ import {
   type PaperRun,
 } from "./paper-store";
 import { SESSION_MANAGE_UNTIL_HOUR, istClock } from "../strategies/types";
-import { expiryWeekday, istWeekday, todayIst } from "../strategies/expiry-day";
+import { istWeekday, todayIst } from "../strategies/expiry-day";
 
 /** Active market-window poll (IST). */
 const ACTIVE_SYNC_MS = 60_000;
