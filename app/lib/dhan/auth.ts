@@ -2,7 +2,11 @@ import { createHmac } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { getDataDir } from "../data-dir";
+import { kvDelete, kvGet, kvSet } from "../store/kv";
+import { isMongoConfigured } from "../mongo";
+import { decryptSecret, encryptSecret } from "../secret";
 import { DhanApiError, DhanConfigError } from "./errors";
+import { getPin } from "./pin";
 
 /**
  * Single source of truth for the Dhan access token.
@@ -14,8 +18,9 @@ import { DhanApiError, DhanConfigError } from "./errors";
  *
  *   1. A token persisted to the data volume (minted via TOTP), reused until it
  *      is close to expiry.
- *   2. TOTP auto-login — when DHAN_CLIENT_ID + DHAN_PIN + DHAN_TOTP_SECRET are
- *      set, a fresh token is minted headlessly on demand (fully hands-off).
+ *   2. TOTP auto-login — when DHAN_CLIENT_ID + DHAN_TOTP_SECRET are set and the
+ *      Dhan PIN has been entered on the login page, a fresh token is minted
+ *      headlessly on demand.
  *   3. DHAN_ACCESS_TOKEN only when TOTP is not configured. Never used as a
  *      silent fallback after TOTP fails — that served a dead token all day.
  */
@@ -73,14 +78,21 @@ function cooldownFilePath() {
   return path.join(getDataDir(), "dhan-totp-cooldown.json");
 }
 
-function totpCooldownMs(message: string) {
+function isDhanRateLimit(message: string) {
+  return message.toLowerCase().includes("too many");
+}
+
+function isWrongPin(message: string) {
   const lower = message.toLowerCase();
-  if (lower.includes("too many")) return 45 * 60_000;
+  return lower.includes("invalid pin") || lower.includes("invalid totp");
+}
+
+function totpCooldownMs(message: string) {
+  if (isDhanRateLimit(message)) return 45 * 60_000;
   if (
-    lower.includes("invalid pin") ||
-    lower.includes("invalid totp") ||
-    lower.includes("401") ||
-    lower.includes("rejected")
+    isWrongPin(message) ||
+    message.toLowerCase().includes("401") ||
+    message.toLowerCase().includes("rejected")
   ) {
     return 15 * 60_000;
   }
@@ -127,6 +139,14 @@ function clearCooldown() {
   } catch {
     // no cooldown file
   }
+  if (isMongoConfigured()) void kvDelete("dhan-totp-cooldown");
+}
+
+/** Login retries a typed PIN; only Dhan "too many" should keep blocking. */
+export function clearLoginCooldown() {
+  const cooldown = readCooldown();
+  if (cooldown && isDhanRateLimit(cooldown.message)) return;
+  clearCooldown();
 }
 
 function assertTotpAllowed() {
@@ -159,18 +179,69 @@ function readStored(): StoredAuth | null {
   return mem.current;
 }
 
-function persist(input: Omit<StoredAuth, "updatedAt">): StoredAuth {
-  const auth: StoredAuth = { ...input, updatedAt: new Date().toISOString() };
+function writeAuthFile(auth: StoredAuth | null) {
   const mem = memory();
   mem.current = auth;
   mem.loaded = true;
   try {
+    if (!auth) {
+      rmSync(authFilePath());
+      return;
+    }
     mkdirSync(getDataDir(), { recursive: true });
     writeFileSync(authFilePath(), JSON.stringify(auth, null, 2), "utf8");
   } catch (error) {
-    console.error("[dhan-auth] failed to persist token", error);
+    if (auth) console.error("[dhan-auth] failed to persist token", error);
   }
+}
+
+type EncryptedAuth = { enc: "v1"; data: string };
+
+function wrapAuth(auth: StoredAuth): EncryptedAuth {
+  return { enc: "v1", data: encryptSecret(JSON.stringify(auth)) };
+}
+
+function unwrapAuth(value: unknown): StoredAuth | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as StoredAuth & EncryptedAuth;
+  if (record.enc === "v1" && typeof record.data === "string") {
+    const plain = decryptSecret(record.data);
+    if (!plain) return null;
+    try {
+      const parsed = JSON.parse(plain) as StoredAuth;
+      return parsed.accessToken ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return record.accessToken ? record : null;
+}
+
+function persist(input: Omit<StoredAuth, "updatedAt">): StoredAuth {
+  const auth: StoredAuth = { ...input, updatedAt: new Date().toISOString() };
+  writeAuthFile(auth);
+  if (isMongoConfigured()) void kvSet("dhan-auth", wrapAuth(auth));
   return auth;
+}
+
+export async function hydrateAuthStore() {
+  if (!isMongoConfigured()) return;
+  const remoteAuth = await kvGet<unknown>("dhan-auth");
+  if (!remoteAuth.ok) throw new Error("[mongo] dhan-auth hydrate failed");
+  const local = readStored();
+  const remote = unwrapAuth(remoteAuth.value);
+  if (remote) {
+    const remoteAt = Date.parse(remote.updatedAt ?? "") || 0;
+    const localAt = Date.parse(local?.updatedAt ?? "") || 0;
+    if (remoteAt >= localAt) writeAuthFile(remote);
+    const raw = remoteAuth.value;
+    if (raw && typeof raw === "object" && !("enc" in raw)) {
+      await kvSet("dhan-auth", wrapAuth(remote));
+    }
+  } else if (local) {
+    await kvSet("dhan-auth", wrapAuth(local));
+  }
+  await kvDelete("dhan-totp-cooldown");
 }
 
 /** Parse a Dhan expiry timestamp, treating tz-less values as IST (+05:30). */
@@ -225,7 +296,7 @@ function isUsable(auth: StoredAuth): boolean {
 function hasTotpCreds(): boolean {
   return Boolean(
     process.env.DHAN_CLIENT_ID?.trim() &&
-      process.env.DHAN_PIN?.trim() &&
+      getPin() &&
       process.env.DHAN_TOTP_SECRET?.trim(),
   );
 }
@@ -304,16 +375,19 @@ function tokenError(payload: DhanTokenResponse, status: number, fallback: string
 }
 
 /** Mint a fresh token headlessly using PIN + TOTP (no browser needed). */
-export async function generateViaTotp(): Promise<StoredAuth> {
+export async function generateViaTotp(options?: {
+  fromLogin?: boolean;
+}): Promise<StoredAuth> {
   const clientId = process.env.DHAN_CLIENT_ID?.trim();
-  const pin = process.env.DHAN_PIN?.trim();
+  const pin = getPin();
   const secret = process.env.DHAN_TOTP_SECRET?.trim();
   if (!clientId || !pin || !secret) {
     throw new DhanConfigError(
-      "TOTP auto-login needs DHAN_CLIENT_ID, DHAN_PIN, and DHAN_TOTP_SECRET.",
+      "TOTP auto-login needs DHAN_CLIENT_ID, DHAN_TOTP_SECRET, and the Dhan PIN from the login page.",
     );
   }
 
+  if (options?.fromLogin) clearLoginCooldown();
   assertTotpAllowed();
 
   const totp = generateTotp(secret);
@@ -333,6 +407,9 @@ export async function generateViaTotp(): Promise<StoredAuth> {
       response.status,
       `TOTP token generation failed (${response.status})`,
     );
+    if (options?.fromLogin && isWrongPin(error.message)) {
+      throw new DhanApiError("Wrong PIN. Try again.", error.status);
+    }
     writeCooldown({
       untilMs: Date.now() + totpCooldownMs(error.message),
       message: error.message,
@@ -353,14 +430,8 @@ export async function generateViaTotp(): Promise<StoredAuth> {
 
 /** Forget any stored token. */
 export function clearToken(): void {
-  const mem = memory();
-  mem.current = null;
-  mem.loaded = true;
-  try {
-    rmSync(authFilePath());
-  } catch {
-    // no stored file — nothing to clear
-  }
+  writeAuthFile(null);
+  if (isMongoConfigured()) void kvDelete("dhan-auth");
 }
 
 /** Drop a token Dhan just rejected so the next call remints instead of reusing it. */
@@ -426,7 +497,7 @@ export async function getAccessToken(options?: {
   if (stored?.accessToken) return stored.accessToken;
 
   throw new DhanConfigError(
-    "No Dhan access token available. Set up TOTP auto-login (DHAN_CLIENT_ID + DHAN_PIN + DHAN_TOTP_SECRET) or set DHAN_ACCESS_TOKEN.",
+    "No Dhan access token available. Unlock with your Dhan PIN on the login page, or set DHAN_ACCESS_TOKEN.",
   );
 }
 

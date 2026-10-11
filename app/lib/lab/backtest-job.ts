@@ -10,6 +10,15 @@ import {
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { getDataDir } from "../data-dir";
+import { getPin } from "../dhan/pin";
+import { getAccessToken } from "../dhan/auth";
+import {
+  dispatchBacktestToCloud,
+  isCloudBacktestClient,
+  keepCloudAwake,
+} from "./backtest-cloud";
+import { kvGet, kvSet } from "../store/kv";
+import { isMongoConfigured } from "../mongo";
 import type { IndexInstrument } from "../dhan/instruments";
 import { countRollingChunks } from "../dhan/rolling-options";
 import type { RollingProgress } from "../dhan/rolling-options";
@@ -125,7 +134,9 @@ function readJobFile(): BacktestJob {
   }
 }
 
-function writeJob(next: BacktestJob) {
+let jobRemoteTimer: ReturnType<typeof setTimeout> | null = null;
+
+function writeJobFile(next: BacktestJob) {
   const file = jobPath();
   const payload = JSON.stringify(next, null, 2);
   let lastError: unknown;
@@ -144,11 +155,75 @@ function writeJob(next: BacktestJob) {
   throw lastError;
 }
 
+function pushJobRemote() {
+  void kvSet("backtest-job", readJobFile());
+}
+
+function writeJob(next: BacktestJob) {
+  writeJobFile(next);
+  if (!isMongoConfigured()) return;
+  if (jobRemoteTimer) {
+    clearTimeout(jobRemoteTimer);
+    jobRemoteTimer = null;
+  }
+  if (next.status !== "running") {
+    pushJobRemote();
+    return;
+  }
+  jobRemoteTimer = setTimeout(() => {
+    jobRemoteTimer = null;
+    pushJobRemote();
+  }, 1500);
+}
+
+export async function pullBacktestJob() {
+  if (!isMongoConfigured()) return;
+  const remote = await kvGet<BacktestJob>("backtest-job");
+  if (!remote.ok || !remote.value) return;
+  const local = readJobFile();
+  const remoteStart = Date.parse(remote.value.startedAt ?? "") || 0;
+  const localStart = Date.parse(local.startedAt ?? "") || 0;
+  const remoteProgress = (remote.value.done ?? 0) + (remote.value.fetched ?? 0);
+  const localProgress = (local.done ?? 0) + (local.fetched ?? 0);
+  if (
+    isCloudBacktestClient() ||
+    remoteStart > localStart ||
+    (remoteStart === localStart && remoteProgress >= localProgress)
+  ) {
+    writeJobFile(remote.value);
+  }
+}
+
+export async function hydrateBacktestJob() {
+  if (!isMongoConfigured()) return;
+  const remote = await kvGet<BacktestJob>("backtest-job");
+  if (!remote.ok) throw new Error("[mongo] backtest-job hydrate failed");
+  if (isCloudBacktestClient()) {
+    if (remote.value) writeJobFile(remote.value);
+    return;
+  }
+  const local = readJobFile();
+  if (!remote.value) {
+    await kvSet("backtest-job", local);
+    return;
+  }
+  const remoteStart = Date.parse(remote.value.startedAt ?? "") || 0;
+  const localStart = Date.parse(local.startedAt ?? "") || 0;
+  if (remoteStart > localStart) writeJobFile(remote.value);
+}
+
+function friendlyJobError(message: string) {
+  if (/DOCTYPE|not valid JSON/i.test(message)) {
+    return "Dhan returned a login page instead of data. Open Settings, generate a token, then run again.";
+  }
+  return message;
+}
+
 function failJob(job: BacktestJob, error: string): BacktestJob {
   const next: BacktestJob = {
     ...job,
     status: "error",
-    error,
+    error: friendlyJobError(error),
     message: "Failed",
     finishedAt: new Date().toISOString(),
   };
@@ -160,8 +235,22 @@ export function peekBacktestJob(): BacktestJob {
   return readJobFile();
 }
 
+/** Drop stale failed jobs so a leftover HTML-parse error does not stick on the page. */
+export function jobForUi(job: BacktestJob): BacktestJob {
+  const error = job.error ? friendlyJobError(job.error) : null;
+  if (job.status === "error") {
+    const finished = Date.parse(job.finishedAt ?? "") || 0;
+    if (!finished || Date.now() - finished > 2 * 60_000) {
+      return { ...IDLE, resultId: job.resultId };
+    }
+  }
+  return { ...job, error };
+}
+
 export function getBacktestJob(): BacktestJob {
-  return reconcileJob(readJobFile());
+  const job = readJobFile();
+  if (isCloudBacktestClient()) return job;
+  return reconcileJob(job);
 }
 
 export function claimBacktestWorker() {
@@ -188,6 +277,7 @@ export function reportBacktestProgress(progress: RollingProgress) {
     progress.fetched > 0
       ? Math.ceil((remaining * 3.2) / 60)
       : Math.ceil((remaining * 0.05) / 60);
+  void keepCloudAwake();
   try {
     writeJob({
       ...prev,
@@ -267,6 +357,7 @@ function spawnWorker(payload: {
     env: {
       ...process.env,
       BACKTEST_JOB: JSON.stringify(payload),
+      DHAN_SESSION_PIN: getPin() ?? "",
     },
     stdio: ["ignore", logFd, logFd],
     detached: true,
@@ -313,21 +404,24 @@ function runInProcess(payload: {
   }, 0);
 }
 
-export function startBacktestJob(input: {
+export async function startBacktestJob(input: {
   instrument: IndexInstrument;
   strategyIds: string[];
   widthSteps: number;
   months: number;
-}): { ok: boolean; error?: string } {
+}): Promise<{ ok: boolean; error?: string }> {
+  await pullBacktestJob();
   const current = getBacktestJob();
   if (current.status === "running") {
+    if (isCloudBacktestClient()) {
+      return { ok: false, error: "A backtest is already running on Railway." };
+    }
     const alive = isPidAlive(current.pid);
     const stuckAtStart = current.done <= 0;
     if (alive && !stuckAtStart) {
       return { ok: false, error: "A backtest is already running." };
     }
     stopPid(current.pid);
-    failJob(current, "Replaced by a new run");
   }
 
   const widthSteps = Math.max(
@@ -337,6 +431,39 @@ export function startBacktestJob(input: {
   const months = Math.max(1, Math.min(12, input.months || 6));
   const total = estimateChunks(input.strategyIds, widthSteps, months);
 
+  const payload = {
+    instrumentId: input.instrument.id,
+    strategyIds: input.strategyIds,
+    widthSteps,
+    months,
+  };
+
+  if (isCloudBacktestClient()) {
+    try {
+      await getAccessToken();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unlock so Railway can use a fresh Dhan token.";
+      return { ok: false, error: message };
+    }
+    writeJob({
+      ...IDLE,
+      status: "running",
+      message: "Waking Railway…",
+      total,
+      startedAt: new Date().toISOString(),
+    });
+    const dispatched = await dispatchBacktestToCloud(payload);
+    if (!dispatched.ok) {
+      failBacktestJob(dispatched.error ?? "Cloud worker failed");
+      return { ok: false, error: dispatched.error };
+    }
+    await pullBacktestJob();
+    return { ok: true };
+  }
+
   writeJob({
     ...IDLE,
     status: "running",
@@ -345,22 +472,15 @@ export function startBacktestJob(input: {
     startedAt: new Date().toISOString(),
   });
 
-  const payload = {
-    instrumentId: input.instrument.id,
-    strategyIds: input.strategyIds,
-    widthSteps,
-    months,
-  };
-
   try {
     const child = spawnWorker(payload);
     if (!child.pid) {
       runInProcess({ ...payload, instrument: input.instrument });
-      return { ok: true };
-    }
-    const latest = readJobFile();
-    if (latest.status === "running" && !latest.pid) {
-      writeJob({ ...latest, pid: child.pid });
+    } else {
+      const latest = readJobFile();
+      if (latest.status === "running" && !latest.pid) {
+        writeJob({ ...latest, pid: child.pid });
+      }
     }
   } catch (error) {
     runInProcess({ ...payload, instrument: input.instrument });
@@ -372,5 +492,17 @@ export function startBacktestJob(input: {
     }
   }
 
+  waitForJobProgress();
   return { ok: true };
+}
+
+function waitForJobProgress() {
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    const job = readJobFile();
+    if (job.status !== "running") return;
+    // Live Dhan fetches take minutes — return so the UI can poll.
+    if (job.fetched > 0) return;
+    sleepSync(50);
+  }
 }

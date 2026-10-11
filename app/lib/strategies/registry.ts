@@ -1,6 +1,6 @@
 import { ironCondorStrategy, IC_DEFAULTS } from "./iron-condor";
 import { orbAtmStrategy, ORB_DEFAULTS } from "./orb-atm";
-import { maxPainStrategy, maxPainTargets, MAX_PAIN_DEFAULTS } from "./max-pain-reversion";
+import { maxPainStrategy, MAX_PAIN_DEFAULTS } from "./max-pain-reversion";
 import { oiRangeFadeStrategy, OI_FADE_DEFAULTS } from "./oi-range-fade";
 import {
   pmSrReversalStrategy,
@@ -16,7 +16,6 @@ import {
   FLAT_BY_HOUR,
   STOP_LOSS_CREDIT_MULT,
   inMorningEntryWindow,
-  inPmReversalEntryWindow,
   istClock,
   MORNING_PLAYBOOK_WINDOW,
 } from "./types";
@@ -108,9 +107,7 @@ export function buildPlaybookSnapshot(
   const weekdayLabel = new Date(`${today}T12:00:00+05:30`).toLocaleDateString("en-IN", { weekday: "long", timeZone: "Asia/Kolkata" });
   const isWeekend = weekday === 0 || weekday === 6;
   const isExpiryDay = weekday === expiryWeekday(instrument.id);
-  const inEntryWindow =
-    !isWeekend &&
-    (inMorningEntryWindow(hour) || inPmReversalEntryWindow(hour, minute));
+  const inEntryWindow = !isWeekend && inMorningEntryWindow(hour);
 
   const ctx: EntryContext = {
     instrument,
@@ -143,8 +140,8 @@ export function buildPlaybookSnapshot(
         primaryLongSide: "CE" as const,
         available: false,
         reason: eligible
-          ? "No edge after costs — sitting out"
-          : "Outside the Project One window",
+          ? "No cheap credit — sitting out"
+          : "Outside 10:00–14:00 IST or a trend morning",
       };
     }
     return { ...proposal, id: strategy.id, available: true };
@@ -157,7 +154,7 @@ export function buildPlaybookSnapshot(
     : isWeekend
       ? `${weekdayLabel} — market closed. Sitting out.`
       : !inEntryWindow
-        ? `Outside ${MORNING_PLAYBOOK_WINDOW} and 14:00–14:15 IST. Sitting out.`
+        ? `Outside ${MORNING_PLAYBOOK_WINDOW} IST. Sitting out.`
         : "Project One has no edge here — sitting out.";
 
   const path = STRATEGIES.map((strategy) => {
@@ -167,22 +164,6 @@ export function buildPlaybookSnapshot(
   });
 
   return { spreads, structure, hour, isExpiryDay, inEntryWindow, pick: picked ? { strategyId: picked.strategy.id, name: picked.strategy.name, reason: picked.reason } : null, sitReason, path };
-}
-
-export function buildPlaybookCards(
-  rows: OptionChainRow[],
-  spot: number,
-  widthSteps = 2,
-  quote?: { open: number; high: number; low: number; prevClose: number },
-  instrument: IndexInstrument = INDEX_INSTRUMENTS[0],
-  prior?: { high: number; low: number; close: number } | null,
-) {
-  return buildPlaybookSnapshot(rows, spot, widthSteps, quote, instrument, prior).spreads;
-}
-
-/** @deprecated use pickPlaybookPath */
-export function pickExpiryPath(ctx: EntryContext, strategyIds?: string[]) {
-  return pickPlaybookPath(ctx, strategyIds);
 }
 
 export function autoPlaybookStrategyIds() {
@@ -234,5 +215,4 @@ export function listStrategies() {
   return STRATEGIES.slice();
 }
 
-export type { TradeProposal as CreditSpreadProposal, Strategy };
-export { maxPainTargets };
+export type { Strategy };

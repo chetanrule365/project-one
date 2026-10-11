@@ -1,6 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import { getDataDir } from "../data-dir";
+import { createJsonStore } from "../store/json-store";
 import { computeMetrics, type BacktestResult } from "./backtest";
 
 export type SavedBacktest = BacktestResult & {
@@ -15,53 +13,26 @@ type Store = {
 
 const MAX_RUNS = 25;
 
-function storePath() {
-  mkdirSync(getDataDir(), { recursive: true });
-  return path.join(getDataDir(), "backtests.json");
-}
+const store = createJsonStore<Store>({
+  key: "backtests",
+  fileName: "backtests.json",
+  empty: () => ({ nextId: 1, runs: [] }),
+  remote: "blob",
+});
 
-let cache: Store | null = null;
-
-function empty(): Store {
-  return { nextId: 1, runs: [] };
+export async function hydrateBacktestStore() {
+  await store.hydrate();
 }
 
 function load(): Store {
-  const file = storePath();
-  if (!existsSync(file)) {
-    cache = empty();
-    return cache;
-  }
-  try {
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as Store;
-    cache = {
-      nextId: Number(parsed.nextId) || 1,
-      runs: Array.isArray(parsed.runs) ? parsed.runs : [],
-    };
-    return cache;
-  } catch (error) {
-    console.error(`[backtest-store] failed to read ${file}`, error);
-    return cache ?? empty();
-  }
+  const state = store.load();
+  state.nextId = Number(state.nextId) || 1;
+  state.runs = Array.isArray(state.runs) ? state.runs : [];
+  return state;
 }
 
 function persist(state: Store) {
-  const file = storePath();
-  const payload = JSON.stringify(state, null, 2);
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    try {
-      writeFileSync(file, payload);
-      cache = state;
-      return;
-    } catch (error) {
-      lastError = error;
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== "EPERM" && code !== "EACCES" && code !== "EBUSY") throw error;
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30);
-    }
-  }
-  throw lastError;
+  store.persist(state);
 }
 
 export function saveBacktest(result: BacktestResult): SavedBacktest {

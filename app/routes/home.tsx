@@ -13,6 +13,8 @@ import {
 } from "../lib/dhan/quotes";
 import { getLivePaperTrades } from "../lib/lab/paper";
 import { ensurePaperWorker } from "../lib/lab/paper-worker";
+import { pullPaperStore } from "../lib/lab/paper-store";
+import { bootSession } from "../lib/session.server";
 
 type LiveTradesData = {
   trades: LiveTrade[];
@@ -30,7 +32,9 @@ export function meta({}: Route.MetaArgs) {
   ];
 }
 
-export async function loader() {
+export async function loader({ request }: Route.LoaderArgs) {
+  await bootSession(request);
+  await pullPaperStore();
   ensurePaperWorker();
   const sandbox = isDhanSandbox();
   const live = getLivePaperTrades() as LiveTradesData;

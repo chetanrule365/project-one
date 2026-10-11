@@ -1,7 +1,6 @@
 import type { Route } from "./+types/api.trades.id.delete";
-import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
-import path from "node:path";
-import { getDataDir } from "../lib/data-dir";
+import { bootSession } from "../lib/session.server";
+import { deletePaperTrade, pullPaperStore } from "../lib/lab/paper-store";
 
 export async function action({ params, request }: Route.ActionArgs) {
   if (request.method !== "DELETE") {
@@ -18,32 +17,15 @@ export async function action({ params, request }: Route.ActionArgs) {
   }
 
   try {
-    const dataDir = getDataDir();
-    const filePath = path.join(dataDir, "paper.json");
-
-    if (!existsSync(filePath)) {
-      return new Response(
-        JSON.stringify({ error: "Paper trades file not found" }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    const data = JSON.parse(readFileSync(filePath, "utf8"));
-
-    const tradeIndex = data.trades.findIndex((t: any) => t.id === tradeId);
-    if (tradeIndex === -1) {
+    await bootSession(request, "api");
+    await pullPaperStore();
+    const deletedTrade = deletePaperTrade(tradeId);
+    if (!deletedTrade) {
       return new Response(
         JSON.stringify({ error: `Trade ID ${tradeId} not found` }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
+        { status: 404, headers: { "Content-Type": "application/json" } },
       );
     }
-
-    const deletedTrade = data.trades[tradeIndex];
-    data.trades.splice(tradeIndex, 1);
-
-    const tmpPath = `${filePath}.tmp`;
-    writeFileSync(tmpPath, JSON.stringify(data, null, 2));
-    renameSync(tmpPath, filePath);
 
     return new Response(
       JSON.stringify({
@@ -54,7 +36,7 @@ export async function action({ params, request }: Route.ActionArgs) {
       {
         status: 200,
         headers: { "Content-Type": "application/json" },
-      }
+      },
     );
   } catch (error) {
     console.error("Error deleting trade:", error);
@@ -66,8 +48,7 @@ export async function action({ params, request }: Route.ActionArgs) {
       {
         status: 500,
         headers: { "Content-Type": "application/json" },
-      }
+      },
     );
   }
 }
-

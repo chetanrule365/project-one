@@ -9,6 +9,8 @@ import {
 import {
   ensurePaperWorker,
 } from "../lib/lab/paper-worker";
+import { pullPaperStore } from "../lib/lab/paper-store";
+import { bootSession } from "../lib/session.server";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -21,6 +23,8 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
+  await bootSession(request);
+  await pullPaperStore();
   ensurePaperWorker();
   const paper = getPaperSnapshot();
   // Past trades only — live/open positions are shown on the home page.

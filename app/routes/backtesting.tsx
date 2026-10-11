@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Link, useFetcher, useRevalidator } from "react-router";
 import type { Route } from "./+types/backtesting";
 import { INDEX_INSTRUMENTS, getIndexByParam } from "../lib/dhan/instruments";
+import { bootSession } from "../lib/session.server";
 import { DhanApiError, DhanConfigError } from "../lib/dhan/quotes";
 import {
   DHAN_FNO_BROKERAGE_PER_ORDER,
@@ -11,9 +12,16 @@ import {
 } from "../lib/lab/backtest";
 import {
   lastBacktestJob,
+  preferJob,
   subscribeBacktestJob,
 } from "../lib/lab/backtest-job-feed";
-import { peekBacktestJob, startBacktestJob } from "../lib/lab/backtest-job";
+import { isCloudBacktestClient } from "../lib/lab/backtest-cloud";
+import {
+  jobForUi,
+  peekBacktestJob,
+  pullBacktestJob,
+  startBacktestJob,
+} from "../lib/lab/backtest-job";
 import {
   getBacktest,
   listBacktests,
@@ -35,9 +43,19 @@ export function meta({}: Route.MetaArgs) {
   ];
 }
 
+export function headers() {
+  return { "Cache-Control": "no-store" };
+}
+
+export function shouldRevalidate() {
+  return true;
+}
+
 export async function loader({ request }: Route.LoaderArgs) {
+  await bootSession(request);
+  await pullBacktestJob();
   const runId = Number(new URL(request.url).searchParams.get("run") ?? "");
-  const job = peekBacktestJob();
+  const job = jobForUi(peekBacktestJob());
   const savedId =
     Number.isFinite(runId) && runId > 0 ? runId : job.resultId;
   const saved = savedId ? getBacktest(savedId) : null;
@@ -47,10 +65,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     history: listBacktests(),
     saved,
     job,
+    cloudWorker: isCloudBacktestClient(),
   };
 }
 
 export async function action({ request }: Route.ActionArgs) {
+  await bootSession(request);
   const form = await request.formData();
 
   try {
@@ -60,7 +80,12 @@ export async function action({ request }: Route.ActionArgs) {
     const months = Number(form.get("months") ?? 6);
     const instrument = getIndexByParam(instrumentId);
     if (!instrument) {
-      return { ok: false as const, error: "Unknown index", backtest: null };
+      return {
+        ok: false as const,
+        error: "Unknown index",
+        backtest: null,
+        job: peekBacktestJob(),
+      };
     }
 
     const strategyIds =
@@ -68,17 +93,27 @@ export async function action({ request }: Route.ActionArgs) {
         ? autoPlaybookStrategyIds()
         : [strategyMode];
 
-    const started = startBacktestJob({
+    const started = await startBacktestJob({
       instrument,
       strategyIds,
       widthSteps,
       months,
     });
     if (!started.ok) {
-      return { ok: false as const, error: started.error ?? "Busy", backtest: null };
+      return {
+        ok: false as const,
+        error: started.error ?? "Busy",
+        backtest: null,
+        job: peekBacktestJob(),
+      };
     }
 
-    return { ok: true as const, error: null, backtest: null };
+    return {
+      ok: true as const,
+      error: null,
+      backtest: null,
+      job: peekBacktestJob(),
+    };
   } catch (error) {
     const message =
       error instanceof DhanConfigError || error instanceof DhanApiError
@@ -86,7 +121,12 @@ export async function action({ request }: Route.ActionArgs) {
         : error instanceof Error
           ? error.message
           : "Backtest failed";
-    return { ok: false as const, error: message, backtest: null };
+    return {
+      ok: false as const,
+      error: message,
+      backtest: null,
+      job: peekBacktestJob(),
+    };
   }
 }
 
@@ -281,18 +321,60 @@ export default function BacktestingPage({
 }: Route.ComponentProps) {
   const run = useFetcher<typeof action>();
   const revalidator = useRevalidator();
-  const [job, setJob] = useState(lastBacktestJob() ?? loaderData.job);
-  const seenResult = useRef<string | null>(null);
-  useEffect(() => subscribeBacktestJob(setJob), []);
-  const resultKey = `${job.status}:${job.resultId ?? ""}:${job.finishedAt ?? ""}`;
+  const polled = useSyncExternalStore(
+    subscribeBacktestJob,
+    lastBacktestJob,
+    () => null,
+  );
+  const [tickJob, setTickJob] = useState<typeof loaderData.job | null>(null);
   useEffect(() => {
-    if (job.status !== "done" && job.status !== "error") return;
-    if (seenResult.current === resultKey) return;
-    seenResult.current = resultKey;
-    revalidator.revalidate();
-  }, [resultKey, job.status, revalidator]);
+    let on = true;
+    const read = (url: string) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", `${url}?t=${Date.now()}`);
+      xhr.setRequestHeader("Accept", "application/json");
+      xhr.setRequestHeader("Cache-Control", "no-store");
+      xhr.onload = () => {
+        if (!on) return;
+        const text = String(xhr.responseText ?? "").trim();
+        if (!text || text.startsWith("<")) return;
+        try {
+          const payload = JSON.parse(text) as { job?: typeof loaderData.job };
+          if (payload.job) setTickJob((prev) => preferJob(prev, payload.job!));
+        } catch {
+          /* next tick */
+        }
+      };
+      xhr.send();
+    };
+    const tick = () => {
+      if (!loaderData.cloudWorker) read("/__backtest-job");
+      read("/api/backtest-job");
+    };
+    tick();
+    const id = window.setInterval(tick, 750);
+    return () => {
+      on = false;
+      window.clearInterval(id);
+    };
+  }, [loaderData.cloudWorker]);
+  const job = preferJob(
+    preferJob(loaderData.job, polled ?? loaderData.job),
+    tickJob ?? loaderData.job,
+  );
   const submitting = run.state !== "idle";
-  const running = job.status === "running" || submitting;
+  const running =
+    job.status === "running" ||
+    (submitting && job.status !== "done" && job.status !== "error");
+  const savedId = loaderData.saved?.id ?? null;
+  const revalidateRef = useRef(revalidator.revalidate);
+  revalidateRef.current = revalidator.revalidate;
+  useEffect(() => {
+    if (job.status === "running") return;
+    if (job.status === "done" && job.resultId && job.resultId !== savedId) {
+      revalidateRef.current();
+    }
+  }, [job.status, job.resultId, savedId]);
   const backtest = loaderData.saved ?? null;
   const history = loaderData.history;
   const error =
@@ -310,9 +392,9 @@ export default function BacktestingPage({
             Backtesting
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
-            Project One only — follow a real break, sell premium only when it
-            pays 4× brokerage, otherwise sit. Saved in data/backtests.json. No
-            real orders.
+            Project One: sell credits only — expiry, day-before, and quiet
+            iron condors. Flatten by 14:00. Never buy premium. Results save to
+            MongoDB. No real orders.
           </p>
         </header>
 
@@ -327,9 +409,11 @@ export default function BacktestingPage({
             Run backtest
           </h2>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            {loaderData.cloudWorker
+              ? "Runs on Railway. This browser only starts the job and shows progress."
+              : "Runs on this server. Set CLOUD_APP_URL to send jobs to Railway instead."}{" "}
             First 12-month run pulls Dhan hourly bars at 1 request / 3s
-            (~10–15 min). This page updates live — no refresh. Cached reruns
-            are fast.
+            (~10–15 min). Cached reruns are seconds.
           </p>
 
           {running ? (

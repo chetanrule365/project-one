@@ -1,6 +1,7 @@
 import { Form, redirect, useNavigation, useSearchParams } from "react-router";
 import type { Route } from "./+types/settings";
 import { clearToken, generateViaTotp, getAuthStatus } from "../lib/dhan/auth";
+import { bootSession } from "../lib/session.server";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -12,11 +13,13 @@ export function meta({}: Route.MetaArgs) {
   ];
 }
 
-export async function loader() {
+export async function loader({ request }: Route.LoaderArgs) {
+  await bootSession(request);
   return { status: getAuthStatus() };
 }
 
 export async function action({ request }: Route.ActionArgs) {
+  await bootSession(request);
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
 
@@ -167,9 +170,10 @@ export default function SettingsPage({ loaderData, actionData }: Route.Component
             </span>
           </div>
           <p className="mb-3 text-sm leading-snug text-slate-500 dark:text-slate-400">
-            Set DHAN_CLIENT_ID, DHAN_PIN, and DHAN_TOTP_SECRET once (enable TOTP
-            on web.dhan.co → DhanHQ Trading APIs → Setup TOTP). The server then
-            mints and refreshes the token itself — no daily action.
+            Set DHAN_CLIENT_ID and DHAN_TOTP_SECRET in env (enable TOTP on
+            web.dhan.co → DhanHQ Trading APIs → Setup TOTP). Unlock with your
+            Dhan PIN on the login page. The server then mints and refreshes the
+            token itself.
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <Form method="post">
@@ -187,7 +191,7 @@ export default function SettingsPage({ loaderData, actionData }: Route.Component
             >
               {status.totpReady
                 ? "TOTP credentials detected"
-                : "Set DHAN_PIN + DHAN_TOTP_SECRET to enable"}
+                : "Unlock with PIN after setting DHAN_TOTP_SECRET"}
             </span>
           </div>
         </section>

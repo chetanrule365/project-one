@@ -2,13 +2,14 @@
  * Production HTTP entry (Railway, GCP VM, local `npm start`).
  * Paper worker starts when the SSR server build loads.
  */
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import compression from "compression";
 import express from "express";
 import { createRequestHandler } from "@react-router/express";
 import { getDataDir } from "../app/lib/data-dir";
+import { jobStatusPayload } from "../app/lib/lab/job-status-payload";
 
 // Log faults but do NOT exit — killing the process after listen causes Railway crash loops.
 process.on("uncaughtException", (error) => {
@@ -19,6 +20,17 @@ process.on("unhandledRejection", (reason) => {
 });
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+try {
+  for (const line of readFileSync(path.join(root, ".env"), "utf8").split(/\r?\n/)) {
+    const m = line.match(/^([^#=]+)=(.*)$/);
+    if (!m) continue;
+    const key = m[1].trim();
+    if (process.env[key]) continue;
+    process.env[key] = m[2].trim().replace(/^["']|["']$/g, "");
+  }
+} catch {
+  /* Railway injects env; local `npm start` reads .env */
+}
 const serverEntry = path.join(root, "build", "server", "index.js");
 const clientDir = path.join(root, "build", "client");
 const port = Number(process.env.PORT) || 3000;
@@ -50,6 +62,10 @@ const app = express();
 app.disable("x-powered-by");
 app.get("/healthz", (_req, res) => {
   res.status(200).type("text/plain").send("ok");
+});
+app.get("/__backtest-job", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.json(jobStatusPayload());
 });
 app.use(compression());
 app.use(

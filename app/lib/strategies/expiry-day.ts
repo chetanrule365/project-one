@@ -37,6 +37,13 @@ export function expiryWeekday(instrumentId: string) {
   return 2; // Tuesday — Nifty & BankNifty
 }
 
+/** 0 = expiry weekday, 1 = day before, … 6 = day after. */
+export function daysToWeeklyExpiry(instrumentId: string, day: string) {
+  const target = expiryWeekday(instrumentId);
+  const current = istWeekday(day);
+  return (target - current + 7) % 7;
+}
+
 /**
  * Returns the YYYY-MM-DD of the next (or same) expiry day for an instrument,
  * starting from `fromDay`. If `fromDay` itself is expiry day, returns `fromDay`.

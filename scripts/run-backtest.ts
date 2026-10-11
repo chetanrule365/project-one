@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { INDEX_INSTRUMENTS, getIndexByParam } from "../app/lib/dhan/instruments";
+import { bootCloudStores } from "../app/lib/store/boot";
 import { runBacktest } from "../app/lib/lab/backtest";
 import { PROJECT_ONE_ID } from "../app/lib/strategies/project-one";
 
@@ -28,6 +29,8 @@ const strategyId = args.get("strategy") ?? PROJECT_ONE_ID;
 const months = Number(args.get("months") ?? 6);
 const widthSteps = Number(args.get("width") ?? 2);
 const instrument = getIndexByParam(instrumentId) ?? INDEX_INSTRUMENTS[0];
+
+await bootCloudStores();
 
 const result = await runBacktest({
   instrument,

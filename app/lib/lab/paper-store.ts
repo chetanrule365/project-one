@@ -1,12 +1,4 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-} from "node:fs";
-import path from "node:path";
-import { getDataDir } from "../data-dir";
+import { createJsonStore } from "../store/json-store";
 import type { Leg } from "../strategies/types";
 import { IC_SPAN_NOTIONAL_FRAC, lotSizeFor } from "../strategies/types";
 import { isExpiryCalendarDay, normalizeExpiryDay } from "../strategies/expiry-day";
@@ -70,42 +62,33 @@ const EMPTY: PaperState = {
   trades: [],
 };
 
-function storePath() {
-  mkdirSync(getDataDir(), { recursive: true });
-  return path.join(getDataDir(), "paper.json");
+const store = createJsonStore<PaperState>({
+  key: "paper",
+  fileName: "paper.json",
+  empty: () => structuredClone(EMPTY),
+  debounceMs: 1500,
+});
+
+export async function hydratePaperStore() {
+  await store.hydrate();
+  hydrateExpirySession(store.load());
 }
 
-let cache: PaperState | null = null;
+export async function pullPaperStore() {
+  await store.pull();
+}
 
 function load(): PaperState {
-  if (cache) return cache;
-  const file = storePath();
-  if (!existsSync(file)) {
-    cache = structuredClone(EMPTY);
-    return cache;
-  }
-  try {
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as PaperState;
-    cache = {
-      nextRunId: Number(parsed.nextRunId) || 1,
-      nextTradeId: Number(parsed.nextTradeId) || 1,
-      runs: Array.isArray(parsed.runs) ? parsed.runs : [],
-      trades: Array.isArray(parsed.trades) ? parsed.trades : [],
-    };
-    hydrateExpirySession(cache);
-  } catch (error) {
-    console.error(`[paper-store] failed to read ${file}, starting empty`, error);
-    cache = structuredClone(EMPTY);
-  }
-  return cache;
+  const state = store.load();
+  state.nextRunId = Number(state.nextRunId) || 1;
+  state.nextTradeId = Number(state.nextTradeId) || 1;
+  state.runs = Array.isArray(state.runs) ? state.runs : [];
+  state.trades = Array.isArray(state.trades) ? state.trades : [];
+  return state;
 }
 
 function save(state: PaperState) {
-  const file = storePath();
-  const tmp = `${file}.tmp`;
-  writeFileSync(tmp, JSON.stringify(state, null, 2));
-  renameSync(tmp, file);
-  cache = state;
+  store.persist(state);
 }
 
 /** Fill missing expiry_session on older rows (entry_at === expiry_at is not reliable). */
@@ -282,6 +265,15 @@ export type PaperTradeExportRow = PaperTrade & {
   width_steps: number | null;
   margin_inr?: number | null;
 };
+
+export function deletePaperTrade(tradeId: number) {
+  const state = load();
+  const index = state.trades.findIndex((trade) => trade.id === tradeId);
+  if (index < 0) return null;
+  const [deleted] = state.trades.splice(index, 1);
+  save(state);
+  return deleted ?? null;
+}
 
 export function listAllTradesWithInstrument(): PaperTradeExportRow[] {
   const state = load();

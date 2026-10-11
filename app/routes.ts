@@ -1,6 +1,7 @@
 import { type RouteConfig, index, route } from "@react-router/dev/routes";
 
 export default [
+  route("login", "routes/login.tsx"),
   index("routes/home.tsx"),
   route("strategies", "routes/strategies.tsx"),
   route("paper", "routes/paper.tsx"),
@@ -9,6 +10,7 @@ export default [
   route("option-chain/:id", "routes/option-chain.$id.tsx"),
   route("settings", "routes/settings.tsx"),
   route("api/backtest-job", "routes/api.backtest-job.ts"),
+  route("api/backtest-run", "routes/api.backtest-run.ts"),
   route("api/market-feed", "routes/api.market-feed.ts"),
   route("api/live-trades", "routes/api.live-trades.ts"),
   route("api/paper-trades.csv", "routes/api.paper-trades-export.ts"),

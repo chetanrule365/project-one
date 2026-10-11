@@ -1,6 +1,8 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getCacheDir } from "../data-dir";
+import { blobGetJson, blobSetJson } from "../store/blob";
+import { isMongoConfigured } from "../mongo";
 import { DhanApiError, dhanRateLimitedPost } from "./config";
 import type { IndexInstrument } from "./instruments";
 
@@ -62,17 +64,75 @@ function cachePath(
 }
 
 async function readCache(file: string): Promise<RollingBar[] | null> {
+  const name = path.basename(file);
   try {
     const raw = await readFile(file, "utf8");
+    if (isMongoConfigured()) void blobSetJson(`option-cache/${name}`, raw, { once: true });
     return JSON.parse(raw) as RollingBar[];
+  } catch {
+    /* try MongoDB */
+  }
+  if (!isMongoConfigured()) return null;
+  const remote = await blobGetJson(`option-cache/${name}`);
+  if (!remote) return null;
+  try {
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, remote, "utf8");
+  } catch {
+    /* disk cache is optional */
+  }
+  try {
+    return JSON.parse(remote) as RollingBar[];
   } catch {
     return null;
   }
 }
 
 async function writeCache(file: string, bars: RollingBar[]) {
+  const json = JSON.stringify(bars);
   await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, JSON.stringify(bars), "utf8");
+  await writeFile(file, json, "utf8");
+  if (isMongoConfigured()) {
+    void blobSetJson(`option-cache/${path.basename(file)}`, json, { once: true });
+  }
+}
+
+function barDayUtc(bar: RollingBar) {
+  return new Date(bar.timestamp * 1000).toISOString().slice(0, 10);
+}
+
+/** Exact file, or bars from older lookback files that already cover this window. */
+async function readCacheWindow(
+  instrument: IndexInstrument,
+  strikeKey: string,
+  right: string,
+  fromDate: string,
+  toDate: string,
+): Promise<RollingBar[] | null> {
+  const exact = await readCache(
+    cachePath(instrument, strikeKey, right, fromDate, toDate),
+  );
+  if (exact) return exact;
+
+  let names: string[] = [];
+  try {
+    names = await readdir(getCacheDir());
+  } catch {
+    return null;
+  }
+  const prefix = `${instrument.id}_${strikeKey}_${right}_`;
+  const byTs = new Map<number, RollingBar>();
+  for (const name of names) {
+    if (!name.startsWith(prefix) || !name.endsWith(".json")) continue;
+    const bars = await readCache(path.join(getCacheDir(), name));
+    if (!bars) continue;
+    for (const bar of bars) {
+      const day = barDayUtc(bar);
+      if (day >= fromDate && day < toDate) byTs.set(bar.timestamp, bar);
+    }
+  }
+  if (byTs.size === 0) return null;
+  return [...byTs.values()].sort((a, b) => a.timestamp - b.timestamp);
 }
 
 function mapSide(
@@ -119,20 +179,31 @@ export type RollingProgress = {
   label: string;
 };
 
-function countSeriesChunks(from: Date, to: Date) {
-  let cursor = new Date(
-    Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()),
+function utcDay(date: Date) {
+  return new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
   );
-  const end = new Date(
-    Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate()),
-  );
-  let n = 0;
-  while (cursor < end) {
-    n += 1;
-    const chunkEnd = addDays(cursor, 30);
-    cursor = chunkEnd < end ? chunkEnd : end;
+}
+
+/** Count backward from `to` so 3/6/12 month lookbacks share the same cache files. */
+function rollingWindows(from: Date, to: Date) {
+  const start = utcDay(from);
+  let cursor = utcDay(to);
+  const windows: Array<{ fromDate: string; toDate: string }> = [];
+  while (cursor > start) {
+    const chunkStart = addDays(cursor, -30);
+    const fromDate = chunkStart > start ? chunkStart : start;
+    windows.unshift({
+      fromDate: formatDate(fromDate),
+      toDate: formatDate(cursor),
+    });
+    cursor = fromDate;
   }
-  return n;
+  return windows;
+}
+
+function countSeriesChunks(from: Date, to: Date) {
+  return rollingWindows(from, to).length;
 }
 
 export function countRollingChunks(
@@ -152,15 +223,28 @@ async function fetchRollingChunk(
   toDate: string,
 ): Promise<{ bars: RollingBar[]; cached: boolean }> {
   const file = cachePath(instrument, strikeKey, right, fromDate, toDate);
-  const cached = await readCache(file);
-  if (cached) return { bars: cached, cached: true };
+  const cached = await readCacheWindow(
+    instrument,
+    strikeKey,
+    right,
+    fromDate,
+    toDate,
+  );
+  if (cached) {
+    try {
+      await writeCache(file, cached);
+    } catch {
+      /* neighbor bars are enough */
+    }
+    return { bars: cached, cached: true };
+  }
 
   const { status, payload } = await dhanRateLimitedPost<RollingPayload>(
     "/v2/charts/rollingoption",
     {
       exchangeSegment: fnoSegment(instrument),
       interval: 60,
-      securityId: instrument.securityId,
+      securityId: String(instrument.securityId),
       instrument: "OPTIDX",
       expiryFlag: "WEEK",
       expiryCode: 1,
@@ -218,31 +302,19 @@ export async function fetchRollingSeries(
   onChunk?: (info: { cached: boolean; label: string }) => void,
 ): Promise<RollingBar[]> {
   const chunks: RollingBar[][] = [];
-  let cursor = new Date(
-    Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()),
-  );
-  const end = new Date(
-    Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate()),
-  );
-
-  while (cursor < end) {
-    const chunkEnd = addDays(cursor, 30);
-    const toDate = chunkEnd < end ? chunkEnd : end;
-    const fromDate = formatDate(cursor);
-    const toLabel = formatDate(toDate);
+  for (const window of rollingWindows(from, to)) {
     const { bars, cached } = await fetchRollingChunk(
       instrument,
       strikeKey,
       right,
-      fromDate,
-      toLabel,
+      window.fromDate,
+      window.toDate,
     );
     onChunk?.({
       cached,
-      label: `${instrument.id} ${strikeKey} ${right} ${fromDate}→${toLabel}`,
+      label: `${instrument.id} ${strikeKey} ${right} ${window.fromDate}→${window.toDate}`,
     });
     chunks.push(bars);
-    cursor = toDate;
   }
 
   return mergeBars(chunks);
@@ -287,6 +359,34 @@ export async function fetchRollingBundle(
     }
   }
   return series;
+}
+
+/** Upload local rolling-option files to MongoDB in the background. */
+export function startOptionCacheSync() {
+  if (!isMongoConfigured()) return;
+  void (async () => {
+    let names: string[] = [];
+    try {
+      names = await readdir(getCacheDir());
+    } catch {
+      return;
+    }
+    let count = 0;
+    for (const name of names) {
+      if (!name.endsWith(".json")) continue;
+      try {
+        const raw = await readFile(path.join(getCacheDir(), name), "utf8");
+        await blobSetJson(`option-cache/${name}`, raw, { once: true });
+        count += 1;
+        if (count % 8 === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 40));
+        }
+      } catch {
+        /* skip unreadable chunks */
+      }
+    }
+    if (count > 0) console.log(`[mongo] option-cache sync queued ${count} files`);
+  })();
 }
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;

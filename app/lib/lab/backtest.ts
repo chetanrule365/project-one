@@ -489,11 +489,7 @@ async function runTradeDays(
     const openBar = dayHours[0];
     const open = openBar.bar.spot || openBar.bar.close;
 
-    const slots = pmOnly
-      ? [14]
-      : projectOne
-        ? [10, 14]
-        : [10];
+    const slots = pmOnly ? [14] : [10, 11];
 
     let busyUntil = -1;
     for (const slotHour of slots) {

@@ -5,7 +5,6 @@ import {
   getStrategy,
   pickPlaybookPath,
 } from "../strategies/registry";
-import { isPmSrReversal } from "../strategies/pm-sr-reversal";
 import { isProjectOne, PROJECT_ONE_ID } from "../strategies/project-one";
 import {
   buildLiveDayStructure,
@@ -21,7 +20,6 @@ import {
   DEFAULT_WIDTH_STEPS,
   IC_SPAN_NOTIONAL_FRAC,
   inMorningEntryWindow,
-  inPmReversalEntryWindow,
   istClock,
   lotSizeFor,
   MORNING_PLAYBOOK_WINDOW,
@@ -200,15 +198,6 @@ function istDayFromStamp(value: string) {
   });
 }
 
-function hasPmReversalToday(runId: number, today: string) {
-  return listTradesForRun(runId).some(
-    (trade) =>
-      (isPmSrReversal(trade.strategy_id) ||
-        (isProjectOne(trade.strategy_id) && (trade.entry_hour ?? 0) >= 14)) &&
-      istDayFromStamp(trade.entry_at) === today,
-  );
-}
-
 function positionFromTrade(open: PaperTrade): OpenPosition {
   const storedLegs = open.legs?.filter(
     (leg) => leg.right === "CE" || leg.right === "PE",
@@ -346,16 +335,15 @@ export async function syncPaper(run?: PaperRun): Promise<{
           : "Weekend — sitting out.",
       };
     }
-    const canEnter =
-      inMorningEntryWindow(hour) || inPmReversalEntryWindow(hour, minute);
+    const canEnter = inMorningEntryWindow(hour);
     if (!canEnter) {
       return {
         run: active,
         opened: null,
         closed,
         message: closed
-          ? `Closed paper trade. Outside ${MORNING_PLAYBOOK_WINDOW} / 14:00–14:15 entry windows.`
-          : `Outside ${MORNING_PLAYBOOK_WINDOW} / 14:00–14:15 IST entry windows.`,
+          ? `Closed paper trade. Outside ${MORNING_PLAYBOOK_WINDOW} IST.`
+          : `Outside ${MORNING_PLAYBOOK_WINDOW} IST. Expiry credits only.`,
       };
     }
 
@@ -401,11 +389,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
       expirySession: liveExpirySession(instrument.id, entryChain.expiry),
     };
 
-    const pmTaken = hasPmReversalToday(active.id, today);
-    const picked =
-      pmTaken && inPmReversalEntryWindow(hour, minute)
-        ? null
-        : pickPlaybookPath(ctx);
+    const picked = pickPlaybookPath(ctx);
 
     if (picked) {
       opened = insertOpenTrade({
@@ -443,10 +427,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
           ? `Opened ${opened.strategy_id} (${clock} IST).`
           : stillOpen
             ? "Open paper trade is still active."
-            : hasPmReversalToday(active.id, today) &&
-                inPmReversalEntryWindow(hour, minute)
-              ? "Project One afternoon slot already used today."
-              : "No playbook signal for current structure — sitting out.";
+            : "No expiry credit for current structure — sitting out.";
 
   return { run: active, opened, closed, message };
 }

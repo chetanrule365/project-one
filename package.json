@@ -6,17 +6,15 @@
     "build": "react-router build && esbuild scripts/railway-start.ts --bundle --platform=node --format=esm --packages=external --outfile=build/start.js",
     "dev": "react-router dev",
     "start": "node build/start.js",
-    "start:serve": "react-router-serve ./build/server/index.js",
-    "paper:worker": "tsx scripts/paper-worker.ts",
     "typecheck": "react-router typegen && tsc"
   },
   "dependencies": {
     "@react-router/express": "^7.15.0",
     "@react-router/node": "7.15.0",
-    "@react-router/serve": "7.15.0",
     "compression": "^1.8.1",
     "express": "^4.22.2",
     "isbot": "^5.1.36",
+    "mongodb": "^7.7.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router": "7.15.0",

@@ -1,5 +1,5 @@
-import { useEffect, useId, useState } from "react";
-import { useLocation, useNavigation } from "react-router";
+import { useEffect, useId, useRef, useState } from "react";
+import { Form, useLocation, useNavigation, useRevalidator } from "react-router";
 
 const links = [
   { to: "/", label: "Market Watch", hint: "Live index quotes", end: true },
@@ -86,6 +86,17 @@ function SidebarNav() {
           );
         })}
       </ul>
+      <div className="border-t border-slate-200 p-3 dark:border-slate-800">
+        <Form method="post" action="/login">
+          <input type="hidden" name="intent" value="logout" />
+          <button
+            type="submit"
+            className="w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            Lock
+          </button>
+        </Form>
+      </div>
     </nav>
   );
 }
@@ -94,11 +105,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const location = useLocation();
   const navigation = useNavigation();
+  const revalidator = useRevalidator();
   const panelId = useId();
   const pending = navigation.state !== "idle";
+  const revalidateRef = useRef(revalidator.revalidate);
+  const revalidatorStateRef = useRef(revalidator.state);
+  revalidateRef.current = revalidator.revalidate;
+  revalidatorStateRef.current = revalidator.state;
 
   useEffect(() => {
     setOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!location.pathname.startsWith("/backtesting")) return;
+    const id = window.setInterval(() => {
+      if (revalidatorStateRef.current === "idle") revalidateRef.current();
+    }, 1000);
+    return () => window.clearInterval(id);
   }, [location.pathname]);
 
   useEffect(() => {
@@ -114,6 +138,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       window.removeEventListener("keydown", onKey);
     };
   }, [open]);
+
+  if (location.pathname === "/login") {
+    return <>{children}</>;
+  }
 
   return (
     <div className="min-h-screen">

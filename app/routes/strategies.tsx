@@ -9,8 +9,9 @@ import {
   fetchIndexQuotes,
   fetchPriorSessionStats,
 } from "../lib/dhan/quotes";
-import { buildPlaybookSnapshot, type PlaybookSnapshot } from "../lib/dhan/strategies";
+import { buildPlaybookSnapshot, type PlaybookSnapshot } from "../lib/strategies/registry";
 import { ensurePaperWorker } from "../lib/lab/paper-worker";
+import { bootSession } from "../lib/session.server";
 import { DEFAULT_WIDTH_STEPS } from "../lib/strategies/types";
 
 export function meta({}: Route.MetaArgs) {
@@ -24,6 +25,7 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
+  await bootSession(request);
   ensurePaperWorker();
   const url = new URL(request.url);
   const instrumentId = String(url.searchParams.get("instrument") ?? "NIFTY");
@@ -117,8 +119,8 @@ export default function StrategiesPage(props: Route.ComponentProps) {
         <header className="mb-4 sm:mb-6">
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl dark:text-white">Playbook</h1>
           <p className="mt-1.5 max-w-2xl text-sm leading-snug text-slate-500 dark:text-slate-400">
-            Project One: follow a break, sell only fat credits, sit otherwise.
-            10:00–14:00 and 14:00–14:15 IST. Simulation only — no real orders. {" "}
+            Project One: sell credits 10:00–14:00 IST (expiry, day-before, quiet days).
+            Simulation only — no real orders. {" "}
             <Link to="/paper" className="font-medium text-sky-700 underline-offset-2 hover:underline dark:text-sky-300">Paper trades</Link>
           </p>
         </header>

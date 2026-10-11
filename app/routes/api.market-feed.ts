@@ -1,8 +1,10 @@
 import type { Route } from "./+types/api.market-feed";
 import { getMarketFeed } from "../lib/dhan/feed";
 import { fetchIndexQuotes } from "../lib/dhan/quotes";
+import { bootSession } from "../lib/session.server";
 
 export async function loader({ request }: Route.LoaderArgs) {
+  await bootSession(request, "api");
   const feed = getMarketFeed();
 
   if (Object.keys(feed.getSnapshot().quotes).length === 0) {

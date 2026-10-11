@@ -7,6 +7,8 @@ import {
   failBacktestJob,
   reportBacktestProgress,
 } from "../app/lib/lab/backtest-job";
+import { takeWorkerPin } from "../app/lib/dhan/pin";
+import { bootCloudStores } from "../app/lib/store/boot";
 import { saveBacktest } from "../app/lib/lab/backtest-store";
 
 try {
@@ -33,6 +35,9 @@ function readPayload(): Payload {
   if (!raw) throw new Error("Missing BACKTEST_JOB payload");
   return JSON.parse(raw) as Payload;
 }
+
+takeWorkerPin();
+await bootCloudStores();
 
 const payload = readPayload();
 const instrument =

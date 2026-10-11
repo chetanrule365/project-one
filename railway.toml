@@ -11,4 +11,7 @@ restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 
 # Attach a Railway Volume mounted at /data in the dashboard.
-# Env: DHAN_CLIENT_ID, DHAN_PIN, DHAN_TOTP_SECRET, DHAN_API_BASE, DATA_DIR=/data
+# Env: DHAN_CLIENT_ID, DHAN_TOTP_SECRET, DHAN_API_BASE, DATA_DIR=/data
+# MONGODB_URI, MONGODB_DB, SESSION_SECRET, CLOUD_WORKER_SECRET
+# Local .env: CLOUD_APP_URL=https://<railway-domain> (do not set this on Railway)
+# Dhan PIN is entered on /login — do not set DHAN_PIN.

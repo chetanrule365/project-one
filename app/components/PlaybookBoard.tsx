@@ -1,4 +1,4 @@
-import type { CreditSpread } from "../lib/dhan/strategies";
+import type { PlaybookCard as CreditSpread } from "../lib/strategies/registry";
 import type { DayStructure } from "../lib/strategies/types";
 
 type PlaybookBoardProps = {
@@ -31,7 +31,6 @@ function shortLegs(spread: CreditSpread) {
 }
 
 function clockLabel(hour: number) {
-  if (hour === 14) return "14:00–14:15 IST break window";
   return `${String(hour).padStart(2, "0")}:xx IST`;
 }
 

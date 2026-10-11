@@ -40,6 +40,12 @@ export async function resolveDhanCredentials(): Promise<{
   return { clientId, accessToken };
 }
 
+function isExpiredSession(error: unknown) {
+  if (!(error instanceof DhanApiError)) return false;
+  if (error.status === 401 || error.status === 403) return true;
+  return /html|redirect/i.test(error.message);
+}
+
 async function dhanPostOnce<T>(
   path: string,
   body: unknown,
@@ -54,19 +60,53 @@ async function dhanPostOnce<T>(
       "client-id": clientId,
     },
     body: JSON.stringify(body),
+    redirect: "manual",
     signal: AbortSignal.timeout(45_000),
   });
 
-  const payload = (await response.json()) as T;
-  return { status: response.status, payload };
+  if (response.status >= 300 && response.status < 400) {
+    throw new DhanApiError(
+      `Dhan ${path} redirected (${response.status}) — access token expired`,
+      401,
+    );
+  }
+
+  const text = await response.text();
+  const trimmed = text.trimStart();
+  if (trimmed.startsWith("<")) {
+    throw new DhanApiError(
+      `Dhan ${path} returned HTML instead of JSON (${response.status}) — access token expired`,
+      401,
+    );
+  }
+  try {
+    return { status: response.status, payload: JSON.parse(text) as T };
+  } catch {
+    throw new DhanApiError(
+      `Dhan ${path} returned non-JSON (${response.status}): ${trimmed.slice(0, 120)}`,
+      response.status,
+    );
+  }
 }
 
 export async function dhanPost<T>(
   path: string,
   body: unknown,
 ): Promise<{ status: number; payload: T }> {
-  const first = await dhanPostOnce<T>(path, body);
-  if (first.status !== 401) return first;
+  const send = () => dhanPostOnce<T>(path, body);
+  let first: { status: number; payload: T };
+  try {
+    first = await send();
+  } catch (error) {
+    if (!isExpiredSession(error)) throw error;
+    try {
+      await getAccessToken({ forceRefresh: true });
+    } catch {
+      throw error;
+    }
+    return send();
+  }
+  if (first.status !== 401 && first.status !== 403) return first;
 
   try {
     await getAccessToken({ forceRefresh: true });
@@ -74,8 +114,8 @@ export async function dhanPost<T>(
     return first;
   }
 
-  const retry = await dhanPostOnce<T>(path, body);
-  if (retry.status === 401) {
+  const retry = await send();
+  if (retry.status === 401 || retry.status === 403) {
     invalidateAccessToken();
     noteRejectedToken();
   }

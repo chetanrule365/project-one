@@ -1,5 +1,12 @@
+import { bootCloudStores } from "../store/boot";
+import { isCloudBacktestClient, keepCloudAwake } from "./backtest-cloud";
 import { ensureAlwaysOnPaperRuns, syncPaper } from "./paper";
-import { getOpenTrade, listActiveRuns, type PaperRun } from "./paper-store";
+import {
+  getOpenTrade,
+  listActiveRuns,
+  pullPaperStore,
+  type PaperRun,
+} from "./paper-store";
 import { SESSION_MANAGE_UNTIL_HOUR, istClock } from "../strategies/types";
 import { expiryWeekday, istWeekday, todayIst } from "../strategies/expiry-day";
 
@@ -66,6 +73,7 @@ async function tick() {
   if (s.running) return;
   s.running = true;
   try {
+    await pullPaperStore();
     const runs = safeActiveRuns();
     if (runs.length === 0) {
       s.lastMessage = "No active paper runs";
@@ -117,11 +125,14 @@ function schedule() {
 
 /** Start background paper sync (idempotent). Survives browser close while Node is up. */
 export function ensurePaperWorker() {
-  ensureAlwaysOnPaperRuns();
-
+  if (isCloudBacktestClient()) {
+    void keepCloudAwake();
+    return;
+  }
   const s = state();
   if (s.started) return;
   s.started = true;
+  ensureAlwaysOnPaperRuns();
   console.log(
     "[paper-worker] started — always-on paper sync for all indices",
   );
@@ -149,5 +160,5 @@ export function getPaperWorkerStatus() {
 }
 
 if (process.env.NODE_ENV === "production") {
-  ensurePaperWorker();
+  void bootCloudStores().then(() => ensurePaperWorker());
 }

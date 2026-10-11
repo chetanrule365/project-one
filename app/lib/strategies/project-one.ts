@@ -1,12 +1,10 @@
 import { proposalCoversCosts } from "./cost-filter";
+import { daysToWeeklyExpiry } from "./expiry-day";
 import { ironCondorStrategy, IC_DEFAULTS } from "./iron-condor";
 import { oiRangeFadeStrategy, OI_FADE_DEFAULTS } from "./oi-range-fade";
-import { orbAtmStrategy, ORB_DEFAULTS } from "./orb-atm";
-import { pmSrReversalStrategy, PM_SR_DEFAULTS } from "./pm-sr-reversal";
 import { assertStrategy, settleLegs } from "./common";
 import {
   inMorningEntryWindow,
-  inPmReversalEntryWindow,
   type EntryContext,
   type OpenPosition,
   type Strategy,
@@ -15,61 +13,111 @@ import {
 
 export const PROJECT_ONE_ID = "PROJECT_ONE";
 
+function noTrend(ctx: EntryContext) {
+  return !ctx.structure.orbBrokenUp && !ctx.structure.orbBrokenDown;
+}
+
+function quietRange(ctx: EntryContext) {
+  return (
+    noTrend(ctx) &&
+    ctx.structure.insidePriorRange &&
+    ctx.structure.quietDay
+  );
+}
+
+function sessionDte(ctx: EntryContext) {
+  if (ctx.expirySession === true) return 0;
+  const cal = daysToWeeklyExpiry(ctx.instrument.id, ctx.structure.day);
+  // Caller marked this as a non-expiry session (holiday/test) even on the
+  // calendar weekday — don't treat it as 0DTE.
+  if (ctx.expirySession === false && cal === 0) return 2;
+  return cal;
+}
+
 function adopt(
   ctx: EntryContext,
   inner: TradeProposal | null,
+  why: string,
 ): TradeProposal | null {
   if (!inner) return null;
+  if (inner.netCredit <= 0) return null;
   if (!proposalCoversCosts(inner, ctx.instrument.id).ok) return null;
   return {
     ...inner,
     strategyId: PROJECT_ONE_ID,
     name: "Project One",
+    description: why,
   };
 }
 
 function pickInner(ctx: EntryContext): TradeProposal | null {
-  if (inPmReversalEntryWindow(ctx.hour, ctx.minute)) {
-    if (!pmSrReversalStrategy.isEligible(ctx)) return null;
-    return adopt(ctx, pmSrReversalStrategy.proposeEntry(ctx));
-  }
   if (!inMorningEntryWindow(ctx.hour)) return null;
+  if (!noTrend(ctx)) return null;
+  const dte = sessionDte(ctx);
 
-  if (orbAtmStrategy.isEligible(ctx)) {
-    const orb = adopt(ctx, orbAtmStrategy.proposeEntry(ctx));
-    if (orb) return orb;
+  if (dte === 0) {
+    const condor = adopt(
+      ctx,
+      ironCondorStrategy.proposeEntry(ctx),
+      "Expiry iron condor — sell theta, flatten 14:00",
+    );
+    if (condor) return condor;
+    if (oiRangeFadeStrategy.isEligible(ctx)) {
+      return adopt(
+        ctx,
+        oiRangeFadeStrategy.proposeEntry(ctx),
+        "Expiry OI credit — fade the wall, flatten 14:00",
+      );
+    }
+    return null;
   }
-  if (oiRangeFadeStrategy.isEligible(ctx)) {
-    const fade = adopt(ctx, oiRangeFadeStrategy.proposeEntry(ctx));
-    if (fade) return fade;
+
+  if (dte === 1) {
+    if (quietRange(ctx) || ironCondorStrategy.isEligible(ctx)) {
+      const condor = adopt(
+        ctx,
+        ironCondorStrategy.proposeEntry(ctx),
+        "Day-before iron condor — weekly still decaying",
+      );
+      if (condor) return condor;
+    }
+    if (oiRangeFadeStrategy.isEligible(ctx)) {
+      return adopt(
+        ctx,
+        oiRangeFadeStrategy.proposeEntry(ctx),
+        "Day-before OI credit",
+      );
+    }
+    return null;
   }
-  if (ironCondorStrategy.isEligible(ctx)) {
-    return adopt(ctx, ironCondorStrategy.proposeEntry(ctx));
-  }
-  return null;
+
+  if (!quietRange(ctx) || !ironCondorStrategy.isEligible(ctx)) return null;
+  return adopt(
+    ctx,
+    ironCondorStrategy.proposeEntry(ctx),
+    "Quiet-day iron condor — range + no ORB break",
+  );
 }
 
 export const projectOneStrategy = assertStrategy({
   id: PROJECT_ONE_ID,
   name: "Project One",
-  bias: "Regime / sit when there is no edge",
+  bias: "Credit theta / sit trend days",
   description:
-    "Follow an opening-range break when dealers are chasing. Sell a 2-leg credit only if the credit pays 4× brokerage. Skip cheap iron condors. Afternoon: break S/R, do not fade. Sit out otherwise.",
+    "Sell credits only: expiry + day-before, and quiet iron condors on other mornings. Flatten by 14:00. Never buy premium.",
   requiredStrikeKeys(widthSteps) {
     return [
       ...new Set([
-        ...orbAtmStrategy.requiredStrikeKeys(widthSteps),
-        ...oiRangeFadeStrategy.requiredStrikeKeys(widthSteps),
         ...ironCondorStrategy.requiredStrikeKeys(widthSteps),
-        ...pmSrReversalStrategy.requiredStrikeKeys(widthSteps),
+        ...oiRangeFadeStrategy.requiredStrikeKeys(widthSteps),
       ]),
     ];
   },
   isEligible(ctx) {
-    return (
-      inMorningEntryWindow(ctx.hour) ||
-      inPmReversalEntryWindow(ctx.hour, ctx.minute)
-    );
+    if (!inMorningEntryWindow(ctx.hour) || !noTrend(ctx)) return false;
+    const dte = sessionDte(ctx);
+    if (dte === 0 || dte === 1) return true;
+    return quietRange(ctx);
   },
   proposeEntry(ctx) {
     return pickInner(ctx);
@@ -91,10 +139,6 @@ export function projectOneDefaults(input?: {
   credit?: number;
   hour?: number;
 }): Partial<OpenPosition> {
-  const credit = input?.credit ?? 0;
-  const hour = input?.hour ?? 10;
-  if (credit < 0 && hour >= 14) return { ...PM_SR_DEFAULTS };
-  if (credit < 0) return { ...ORB_DEFAULTS };
-  if (credit > 0) return { ...OI_FADE_DEFAULTS };
+  if ((input?.credit ?? 0) > 0) return { ...OI_FADE_DEFAULTS };
   return { ...IC_DEFAULTS };
 }

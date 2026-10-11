@@ -1,56 +1,25 @@
 import type { Route } from "./+types/api.backtest-job";
-import { peekBacktestJob } from "../lib/lab/backtest-job";
+import { isCloudBacktestClient, keepCloudAwake } from "../lib/lab/backtest-cloud";
+import { jobForUi, peekBacktestJob, pullBacktestJob } from "../lib/lab/backtest-job";
+import { bootSession } from "../lib/session.server";
+
+export function shouldRevalidate() {
+  return true;
+}
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const accept = request.headers.get("accept") ?? "";
-  if (!accept.includes("text/event-stream")) {
-    return Response.json(
-      { job: peekBacktestJob() },
-      { headers: { "Cache-Control": "no-store" } },
-    );
+  await bootSession(request, "api");
+  await pullBacktestJob();
+  if (isCloudBacktestClient() && peekBacktestJob().status === "running") {
+    void keepCloudAwake();
   }
-
-  const stream = new ReadableStream({
-    start(controller) {
-      const encoder = new TextEncoder();
-      let closed = false;
-
-      const send = () => {
-        if (closed) return;
-        try {
-          controller.enqueue(
-            encoder.encode(
-              `event: job\ndata: ${JSON.stringify(peekBacktestJob())}\n\n`,
-            ),
-          );
-        } catch {
-          cleanup();
-        }
-      };
-
-      const timer = setInterval(send, 1000);
-      const cleanup = () => {
-        if (closed) return;
-        closed = true;
-        clearInterval(timer);
-        try {
-          controller.close();
-        } catch {
-          /* already closed */
-        }
-      };
-
-      send();
-      request.signal.addEventListener("abort", cleanup);
+  return Response.json(
+    { job: jobForUi(peekBacktestJob()) },
+    {
+      headers: {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        Pragma: "no-cache",
+      },
     },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-    },
-  });
+  );
 }

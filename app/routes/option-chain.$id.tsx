@@ -7,6 +7,7 @@ import {
 import { INDEX_INSTRUMENTS, getIndexByParam } from "../lib/dhan/instruments";
 import { loadOptionChainPage } from "../lib/dhan/option-chain";
 import { DhanApiError, DhanConfigError } from "../lib/dhan/quotes";
+import { bootSession } from "../lib/session.server";
 
 export function meta({ data }: Route.MetaArgs) {
   const name = data?.instrument?.name ?? "Index";
@@ -17,6 +18,7 @@ export function meta({ data }: Route.MetaArgs) {
 }
 
 export async function loader({ params, request }: Route.LoaderArgs) {
+  await bootSession(request);
   const instrument = getIndexByParam(params.id);
   if (!instrument) {
     throw new Response("Index not found", { status: 404 });

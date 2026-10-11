@@ -3,13 +3,29 @@ import {
   Links,
   Meta,
   Outlet,
+  redirect,
   Scripts,
   ScrollRestoration,
 } from "react-router";
 
 import type { Route } from "./+types/root";
 import { AppShell } from "./components/AppShell";
+import { hasPin, hydratePinFromRequest } from "./lib/dhan/pin";
+import { bootCloudStores } from "./lib/store/boot";
+import { safeNextPath } from "./lib/next-path";
 import "./app.css";
+
+export async function loader({ request }: Route.LoaderArgs) {
+  await bootCloudStores();
+  hydratePinFromRequest(request);
+  const url = new URL(request.url);
+  if (url.pathname === "/login") return { unlocked: hasPin() };
+  if (!hasPin()) {
+    const next = safeNextPath(url.pathname + url.search);
+    throw redirect(`/login?next=${encodeURIComponent(next)}`);
+  }
+  return { unlocked: true };
+}
 
 export const links: Route.LinksFunction = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
