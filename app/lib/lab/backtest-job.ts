@@ -15,6 +15,7 @@ import { getAccessToken } from "../dhan/auth";
 import {
   dispatchBacktestToCloud,
   isCloudBacktestClient,
+  isCloudRuntime,
   keepCloudAwake,
 } from "./backtest-cloud";
 import { kvGet, kvSet } from "../store/kv";
@@ -111,10 +112,19 @@ function msSinceProgress(job: BacktestJob) {
   return 0;
 }
 
+function jobAgeMs(job: BacktestJob) {
+  const started = Date.parse(job.startedAt ?? "") || 0;
+  return started > 0 ? Date.now() - started : 0;
+}
+
 function reconcileJob(job: BacktestJob): BacktestJob {
   if (job.status !== "running") return job;
   const quietMs = msSinceProgress(job);
   const pidAlive = isPidAlive(job.pid);
+  const neverStarted = job.done <= 0 && job.fetched <= 0;
+  if (!pidAlive && neverStarted && jobAgeMs(job) > 12_000) {
+    return failJob(job, "Worker never started — click Run backtest again");
+  }
   if (quietMs > 45_000 && !pidAlive) {
     return failJob(job, "Worker stopped — click Run backtest again");
   }
@@ -188,7 +198,7 @@ export async function pullBacktestJob() {
   if (
     isCloudBacktestClient() ||
     remoteStart > localStart ||
-    (remoteStart === localStart && remoteProgress >= localProgress)
+    (remoteStart === localStart && remoteProgress > localProgress)
   ) {
     writeJobFile(remote.value);
   }
@@ -342,6 +352,13 @@ function estimateChunks(
   return countRollingChunks(strikeKeys, ["CALL", "PUT"], from, to);
 }
 
+function canSpawnWorker() {
+  if (isCloudRuntime()) return false;
+  const worker = path.join(process.cwd(), "scripts", "backtest-worker.ts");
+  const tsxCli = path.join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
+  return existsSync(worker) && existsSync(tsxCli);
+}
+
 function spawnWorker(payload: {
   instrumentId: string;
   strategyIds: string[];
@@ -467,10 +484,15 @@ export async function startBacktestJob(input: {
   writeJob({
     ...IDLE,
     status: "running",
-    message: "Starting worker…",
+    message: isCloudRuntime() ? "Running in server…" : "Starting worker…",
     total,
     startedAt: new Date().toISOString(),
   });
+
+  if (!canSpawnWorker()) {
+    runInProcess({ ...payload, instrument: input.instrument });
+    return { ok: true };
+  }
 
   try {
     const child = spawnWorker(payload);
@@ -481,6 +503,7 @@ export async function startBacktestJob(input: {
       if (latest.status === "running" && !latest.pid) {
         writeJob({ ...latest, pid: child.pid });
       }
+      waitForJobProgress();
     }
   } catch (error) {
     runInProcess({ ...payload, instrument: input.instrument });
@@ -492,7 +515,6 @@ export async function startBacktestJob(input: {
     }
   }
 
-  waitForJobProgress();
   return { ok: true };
 }
 

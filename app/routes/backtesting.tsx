@@ -17,6 +17,7 @@ import {
 } from "../lib/lab/backtest-job-feed";
 import { isCloudBacktestClient } from "../lib/lab/backtest-cloud";
 import {
+  getBacktestJob,
   jobForUi,
   peekBacktestJob,
   pullBacktestJob,
@@ -55,7 +56,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   await bootSession(request);
   await pullBacktestJob();
   const runId = Number(new URL(request.url).searchParams.get("run") ?? "");
-  const job = jobForUi(peekBacktestJob());
+  const job = jobForUi(getBacktestJob());
   const savedId =
     Number.isFinite(runId) && runId > 0 ? runId : job.resultId;
   const saved = savedId ? getBacktest(savedId) : null;
