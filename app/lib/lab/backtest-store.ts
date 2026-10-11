@@ -24,6 +24,16 @@ export async function hydrateBacktestStore() {
   await store.hydrate();
 }
 
+export async function pullBacktestStore() {
+  await store.pull();
+}
+
+/** Wipe saved results. Does not touch the rolling option-cache or a running job. */
+export function clearSavedBacktests() {
+  const state = load();
+  persist({ nextId: state.nextId || 1, runs: [] });
+}
+
 function load(): Store {
   const state = store.load();
   state.nextId = Number(state.nextId) || 1;

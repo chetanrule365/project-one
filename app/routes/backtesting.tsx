@@ -24,8 +24,10 @@ import {
   startBacktestJob,
 } from "../lib/lab/backtest-job";
 import {
+  clearSavedBacktests,
   getBacktest,
   listBacktests,
+  pullBacktestStore,
   type SavedBacktest,
 } from "../lib/lab/backtest-store";
 import {
@@ -55,6 +57,7 @@ export function shouldRevalidate() {
 export async function loader({ request }: Route.LoaderArgs) {
   await bootSession(request);
   await pullBacktestJob();
+  await pullBacktestStore();
   const runId = Number(new URL(request.url).searchParams.get("run") ?? "");
   const job = jobForUi(getBacktestJob());
   const savedId =
@@ -73,6 +76,18 @@ export async function loader({ request }: Route.LoaderArgs) {
 export async function action({ request }: Route.ActionArgs) {
   await bootSession(request);
   const form = await request.formData();
+  const intent = String(form.get("intent") ?? "run");
+
+  if (intent === "clear-saved") {
+    await pullBacktestStore();
+    clearSavedBacktests();
+    return {
+      ok: true as const,
+      error: null,
+      backtest: null,
+      job: peekBacktestJob(),
+    };
+  }
 
   try {
     const instrumentId = String(form.get("instrumentId") ?? "NIFTY");
@@ -336,6 +351,7 @@ export default function BacktestingPage({
   loaderData,
 }: Route.ComponentProps) {
   const run = useFetcher<typeof action>();
+  const clear = useFetcher<typeof action>();
   const revalidator = useRevalidator();
   const polled = useSyncExternalStore(
     subscribeBacktestJob,
@@ -534,9 +550,21 @@ export default function BacktestingPage({
 
         {history.length > 0 ? (
           <section className="mt-8">
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
-              Saved runs
-            </h2>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+                Saved runs
+              </h2>
+              <clear.Form method="post">
+                <input type="hidden" name="intent" value="clear-saved" />
+                <button
+                  type="submit"
+                  disabled={clear.state !== "idle"}
+                  className="cursor-pointer text-xs font-medium text-slate-500 underline-offset-2 hover:text-rose-700 hover:underline disabled:cursor-wait dark:hover:text-rose-300"
+                >
+                  {clear.state !== "idle" ? "Clearing…" : "Clear saved runs"}
+                </button>
+              </clear.Form>
+            </div>
             <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
               <table className="min-w-full text-sm">
                 <thead className="bg-slate-50 text-xs tracking-wide text-slate-500 uppercase dark:bg-slate-900 dark:text-slate-400">
