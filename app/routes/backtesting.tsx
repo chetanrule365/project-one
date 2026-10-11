@@ -140,6 +140,21 @@ function formatNumber(value: number, digits = 2) {
   });
 }
 
+function formatIstStamp(iso: string) {
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return "—";
+  return date.toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  });
+}
+
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white/90 p-4 dark:border-slate-800 dark:bg-slate-900/70">
@@ -162,7 +177,7 @@ function BacktestResults({ result }: { result: SavedBacktest }) {
         {result.instrumentId} · {result.from} → {result.to} · lot{" "}
         {result.lotSize} · wing width {result.widthSteps} ·{" "}
         {result.mode === "auto" ? "Auto path" : "Single path"}
-        {` · saved ${new Date(result.savedAt).toLocaleString("en-IN")}`}
+        {` · saved ${formatIstStamp(result.savedAt)} IST`}
         {` · Dhan ₹${DHAN_FNO_BROKERAGE_PER_ORDER}/order (buy+sell each leg; GST/STT not included)`}
       </p>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -547,7 +562,7 @@ export default function BacktestingPage({
                           to={`/backtesting?run=${run.id}`}
                           className="font-medium text-sky-700 underline-offset-2 hover:underline dark:text-sky-300"
                         >
-                          {new Date(run.savedAt).toLocaleString("en-IN")}
+                          {formatIstStamp(run.savedAt)} IST
                         </Link>
                       </td>
                       <td className="px-3 py-2">{run.instrumentId}</td>
