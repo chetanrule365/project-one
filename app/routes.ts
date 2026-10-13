@@ -15,5 +15,6 @@ export default [
   route("api/live-trades", "routes/api.live-trades.ts"),
   route("api/paper-trades.csv", "routes/api.paper-trades-export.ts"),
   route("api/trades/:id/delete", "routes/api.trades.id.delete.ts"),
+  route("*", "routes/$.tsx"),
 ] satisfies RouteConfig;
 

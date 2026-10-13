@@ -56,6 +56,10 @@ export type OpenPosition = {
   targetSpot?: number;
   /** Adverse spot stop level */
   stopSpot?: number;
+  /** Exit if spot reclaims this level (failed continuation). */
+  reclaimSpot?: number;
+  /** `below` = breakout failed. `above` = breakdown failed. */
+  reclaimDir?: "below" | "above";
 };
 
 export type DayStructure = {
@@ -80,6 +84,17 @@ export type DayStructure = {
   sessionLow?: number;
 };
 
+/** A 5-minute push through a stop pool, then either a failure or a hold. */
+export type SweepSignal = {
+  kind: "trap-up" | "trap-down" | "accept-up" | "accept-down";
+  levelName: string;
+  level: number;
+  hour: number;
+  minute: number;
+  /** Sweep-bar volume divided by the median of the prior 5-minute bars. */
+  volumeRatio: number;
+};
+
 export type EntryContext = {
   instrument: IndexInstrument;
   spot: number;
@@ -100,6 +115,8 @@ export type EntryContext = {
    * backward-compatible tests.
    */
   expirySession?: boolean;
+  /** Fresh 5-minute trap or held break for the sweep sleeve. */
+  sweep?: SweepSignal | null;
 };
 
 export type Strategy = {
@@ -148,6 +165,13 @@ export const MORNING_PLAYBOOK_WINDOW = "10:00–14:00 IST";
 
 export function inMorningEntryWindow(hour: number) {
   return hour >= 10 && hour < MORNING_ENTRY_UNTIL_HOUR;
+}
+
+/** Sweep entries 10:00–12:00 IST. Afternoon signals were a coin flip. */
+export function inSweepEntryWindow(hour: number, minute = 0) {
+  if (hour < 10) return false;
+  if (hour >= 12) return false;
+  return minute >= 0;
 }
 
 /** Live: 14:00–14:15. Omitted minute counts as :00 (hourly 14:00 snapshot). */

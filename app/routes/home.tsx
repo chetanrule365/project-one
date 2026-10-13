@@ -3,6 +3,7 @@ import { useFetcher } from "react-router";
 import type { Route } from "./+types/home";
 import { IndexCard } from "../components/IndexCard";
 import { LivePaperTrades, type LiveTrade } from "../components/LivePaperTrades";
+import type { WalletSnapshot } from "../lib/lab/wallet";
 import type { FeedStatus, IndexQuote } from "../lib/dhan/instruments";
 import { INDEX_INSTRUMENTS } from "../lib/dhan/instruments";
 import {
@@ -20,6 +21,7 @@ type LiveTradesData = {
   trades: LiveTrade[];
   totalPnlInr: number;
   asOf: string | null;
+  wallet?: WalletSnapshot;
 };
 
 export function meta({}: Route.MetaArgs) {
@@ -211,6 +213,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
             trades={live.trades}
             totalPnlInr={live.totalPnlInr}
             asOf={live.asOf}
+            wallet={live.wallet}
           />
         </div>
 

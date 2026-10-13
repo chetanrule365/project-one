@@ -9,8 +9,11 @@ import {
   fetchIndexQuotes,
   fetchPriorSessionStats,
 } from "../lib/dhan/quotes";
+import { loadTodaySweepBars } from "../lib/dhan/intraday-5m";
 import { buildPlaybookSnapshot, type PlaybookSnapshot } from "../lib/strategies/registry";
+import { getPaperWallet } from "../lib/lab/paper";
 import { ensurePaperWorker } from "../lib/lab/paper-worker";
+import { pullPaperStore } from "../lib/lab/paper-store";
 import { bootSession } from "../lib/session.server";
 import { DEFAULT_WIDTH_STEPS } from "../lib/strategies/types";
 
@@ -26,12 +29,16 @@ export function meta({}: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   await bootSession(request);
+  await pullPaperStore();
   ensurePaperWorker();
+  const wallet = getPaperWallet();
   const url = new URL(request.url);
   const instrumentId = String(url.searchParams.get("instrument") ?? "NIFTY");
   const instrument = getIndexByParam(instrumentId) ?? INDEX_INSTRUMENTS[0];
   const widthParam = Number(url.searchParams.get("width") ?? DEFAULT_WIDTH_STEPS);
-  const widthSteps = Number.isFinite(widthParam) ? Math.max(1, Math.min(5, Math.floor(widthParam))) : DEFAULT_WIDTH_STEPS;
+  const widthSteps = Number.isFinite(widthParam)
+    ? Math.max(1, Math.min(5, Math.floor(widthParam)))
+    : DEFAULT_WIDTH_STEPS;
   const requestedExpiry = url.searchParams.get("expiry");
 
   let snapshot: PlaybookSnapshot | null = null;
@@ -46,7 +53,12 @@ export async function loader({ request }: Route.LoaderArgs) {
       const quotes = await fetchIndexQuotes();
       const match = quotes.find((q) => q.id === instrument.id);
       if (match) {
-        quote = { open: match.open, high: match.high, low: match.low, prevClose: match.prevClose };
+        quote = {
+          open: match.open,
+          high: match.high,
+          low: match.low,
+          prevClose: match.prevClose,
+        };
       }
     } catch {
       quote = undefined;
@@ -59,6 +71,13 @@ export async function loader({ request }: Route.LoaderArgs) {
       prior = null;
     }
 
+    let tape: Awaited<ReturnType<typeof loadTodaySweepBars>> = [];
+    try {
+      tape = await loadTodaySweepBars(instrument);
+    } catch {
+      tape = [];
+    }
+
     snapshot = buildPlaybookSnapshot(
       chain.rows,
       chain.spot,
@@ -67,6 +86,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       instrument,
       prior,
       chain.expiry,
+      tape,
     );
     expiry = chain.expiry;
     spot = chain.spot;
@@ -88,16 +108,9 @@ export async function loader({ request }: Route.LoaderArgs) {
       expiry,
       spot,
       error: playbookError,
+      walletFreeInr: wallet.freeInr,
     },
   };
-}
-
-function formatNumber(value: number, digits = 2) {
-  if (!Number.isFinite(value)) return "—";
-  return value.toLocaleString("en-IN", {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  });
 }
 
 export default function StrategiesPage(props: Route.ComponentProps) {
@@ -110,6 +123,7 @@ export default function StrategiesPage(props: Route.ComponentProps) {
       expiry: "",
       spot: null,
       error: null,
+      walletFreeInr: undefined,
     },
   };
   const { playbook } = loaderData;
@@ -118,35 +132,68 @@ export default function StrategiesPage(props: Route.ComponentProps) {
     <main className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 px-3 py-4 sm:px-4 sm:py-8 dark:from-gray-950 dark:via-gray-950 dark:to-gray-900">
       <div className="mx-auto max-w-6xl">
         <header className="mb-4 sm:mb-6">
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl dark:text-white">Playbook</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl dark:text-white">
+            Playbook
+          </h1>
           <p className="mt-1.5 max-w-2xl text-sm leading-snug text-slate-500 dark:text-slate-400">
-            Project One: sell credits 10:00–14:00 IST (expiry + day-before; Bank Nifty last Tuesday only).
-            Simulation only — no real orders. {" "}
-            <Link to="/paper" className="font-medium text-sky-700 underline-offset-2 hover:underline dark:text-sky-300">Paper trades</Link>
+            Project One and Sweep can both be on at the same time. Sweep fades
+            failed stop-hunts and sits out real breaks. Bank Nifty last Tuesday
+            only.
+            Simulation only — no real orders.{" "}
+            <Link
+              to="/paper"
+              className="font-medium text-sky-700 underline-offset-2 hover:underline dark:text-sky-300"
+            >
+              Paper trades
+            </Link>
           </p>
         </header>
 
         <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-3 sm:mb-8 sm:p-4 dark:border-slate-800 dark:bg-slate-900/70">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-lg font-semibold text-slate-900 dark:text-white">{playbook.instrument.name}</p>
-              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{playbook.expiry ? playbook.expiry : "No expiry loaded"}</p>
+              <p className="text-lg font-semibold text-slate-900 dark:text-white">
+                {playbook.instrument.name}
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                {playbook.expiry ? playbook.expiry : "No expiry loaded"}
+              </p>
             </div>
             <form method="get" className="grid grid-cols-2 gap-2 sm:flex sm:items-end">
-              {playbook.expiry ? <input type="hidden" name="expiry" value={playbook.expiry} /> : null}
+              {playbook.expiry ? (
+                <input type="hidden" name="expiry" value={playbook.expiry} />
+              ) : null}
               <label className="block">
-                <span className="mb-1 block text-[11px] font-medium tracking-wide text-slate-500 uppercase">Index</span>
-                <select name="instrument" defaultValue={playbook.instrument.id} onChange={(event) => event.currentTarget.form?.requestSubmit()} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm sm:w-40 dark:border-slate-700 dark:bg-slate-950">
+                <span className="mb-1 block text-[11px] font-medium tracking-wide text-slate-500 uppercase">
+                  Index
+                </span>
+                <select
+                  name="instrument"
+                  defaultValue={playbook.instrument.id}
+                  onChange={(event) => event.currentTarget.form?.requestSubmit()}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm sm:w-40 dark:border-slate-700 dark:bg-slate-950"
+                >
                   {loaderData.instruments.map((instrument) => (
-                    <option key={instrument.id} value={instrument.id}>{instrument.name}</option>
+                    <option key={instrument.id} value={instrument.id}>
+                      {instrument.name}
+                    </option>
                   ))}
                 </select>
               </label>
               <label className="block">
-                <span className="mb-1 block text-[11px] font-medium tracking-wide text-slate-500 uppercase">Width</span>
-                <select name="width" defaultValue={String(playbook.widthSteps)} onChange={(event) => event.currentTarget.form?.requestSubmit()} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm sm:w-20 dark:border-slate-700 dark:bg-slate-950">
+                <span className="mb-1 block text-[11px] font-medium tracking-wide text-slate-500 uppercase">
+                  Width
+                </span>
+                <select
+                  name="width"
+                  defaultValue={String(playbook.widthSteps)}
+                  onChange={(event) => event.currentTarget.form?.requestSubmit()}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm sm:w-20 dark:border-slate-700 dark:bg-slate-950"
+                >
                   {[1, 2, 3, 4].map((step) => (
-                    <option key={step} value={step}>{step}</option>
+                    <option key={step} value={step}>
+                      {step}
+                    </option>
                   ))}
                 </select>
               </label>
@@ -154,7 +201,9 @@ export default function StrategiesPage(props: Route.ComponentProps) {
           </div>
 
           {playbook.error ? (
-            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/50 dark:text-rose-200">{playbook.error}</div>
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/50 dark:text-rose-200">
+              {playbook.error}
+            </div>
           ) : playbook.snapshot && playbook.expiry && playbook.spot != null ? (
             <PlaybookBoard
               spreads={playbook.snapshot.spreads}
@@ -162,9 +211,11 @@ export default function StrategiesPage(props: Route.ComponentProps) {
               hour={playbook.snapshot.hour}
               isExpiryDay={playbook.snapshot.isExpiryDay}
               inEntryWindow={playbook.snapshot.inEntryWindow}
-              pick={playbook.snapshot.pick}
+              picks={playbook.snapshot.picks}
               sitReason={playbook.snapshot.sitReason}
               spot={playbook.spot}
+              instrumentId={playbook.instrument.id}
+              walletFreeInr={playbook.walletFreeInr}
             />
           ) : (
             <p className="text-sm text-slate-500">Loading playbook…</p>

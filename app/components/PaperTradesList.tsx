@@ -61,19 +61,29 @@ function formatIstTime(date: Date) {
 
 function formatWhen(trade: PaperTradeRow) {
   const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(trade.entry_at);
-  if (!dateOnly) {
-    const entered = new Date(trade.entry_at);
-    if (Number.isFinite(entered.getTime())) {
-      return `${formatIstDate(entered)}, ${formatIstTime(entered)}`;
-    }
+  const entered = dateOnly
+    ? null
+    : (() => {
+        const at = new Date(trade.entry_at);
+        return Number.isFinite(at.getTime()) ? at : null;
+      })();
+  const exited =
+    trade.exit_at != null
+      ? (() => {
+          const at = new Date(trade.exit_at);
+          return Number.isFinite(at.getTime()) ? at : null;
+        })()
+      : null;
+
+  if (entered) {
+    const head = `${formatIstDate(entered)}, ${formatIstTime(entered)}`;
+    if (exited) return `${head} → ${formatIstTime(exited)}`;
+    if (trade.status === "open") return `${head} · open`;
+    return head;
   }
+
   const day = formatIstDate(new Date(`${trade.entry_at}T12:00:00+05:30`));
-  if (trade.exit_at) {
-    const exited = new Date(trade.exit_at);
-    if (Number.isFinite(exited.getTime())) {
-      return `${day} · closed ${formatIstTime(exited)}`;
-    }
-  }
+  if (exited) return `${day} · ${formatIstTime(exited)}`;
   return day;
 }
 
@@ -165,7 +175,7 @@ export function PaperTradesList({ trades }: { trades: PaperTradeRow[] }) {
             <tr>
               <th className="px-3 py-2 text-left">Index</th>
               <th className="px-3 py-2 text-left">Path</th>
-              <th className="px-3 py-2 text-left">Entry</th>
+              <th className="px-3 py-2 text-left">When</th>
               <th className="px-3 py-2 text-right">Legs</th>
               <th className="px-3 py-2 text-right">Premium</th>
               <th className="px-3 py-2 text-right">Margin ₹</th>

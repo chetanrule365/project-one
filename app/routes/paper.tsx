@@ -1,5 +1,6 @@
 import type { Route } from "./+types/paper";
 import { PaperTradesList } from "../components/PaperTradesList";
+import { WalletStrip } from "../components/WalletStrip";
 import {
   currentMonthIst,
   entryMonthIst,
@@ -22,39 +23,42 @@ export function meta({}: Route.MetaArgs) {
   ];
 }
 
+function monthFromSearch(value: string | null, fallback: string) {
+  if (value === "all") return "all";
+  if (value && /^\d{4}-\d{2}$/.test(value)) return value;
+  return fallback;
+}
+
 export async function loader({ request }: Route.LoaderArgs) {
   await bootSession(request);
   await pullPaperStore();
   ensurePaperWorker();
   const paper = getPaperSnapshot();
-  // Past trades only — live/open positions are shown on the home page.
   const closedTrades = paper.trades.filter((trade) => trade.status === "closed");
   const currentMonth = currentMonthIst();
-  const requested = new URL(request.url).searchParams.get("month");
-  const month =
-    requested && /^\d{4}-\d{2}$/.test(requested) ? requested : currentMonth;
   const months = [
     ...new Set(
       [currentMonth, ...closedTrades.map((trade) => entryMonthIst(trade.entry_at))],
     ),
   ].sort((a, b) => b.localeCompare(a));
-  const trades = closedTrades.filter(
-    (trade) => entryMonthIst(trade.entry_at) === month,
+  const month = monthFromSearch(
+    new URL(request.url).searchParams.get("month"),
+    currentMonth,
   );
-  const monthPnl = trades.reduce(
-    (sum, trade) => sum + (trade.pnl_inr ?? 0),
-    0,
-  );
+  const trades =
+    month === "all"
+      ? closedTrades
+      : closedTrades.filter((trade) => entryMonthIst(trade.entry_at) === month);
 
   return {
     paper: {
       ...paper,
       trades,
     },
-    month,
     months,
-    monthPnl,
-    monthLabel: formatMonthLabel(month),
+    month,
+    monthPnl: trades.reduce((sum, trade) => sum + (trade.pnl_inr ?? 0), 0),
+    monthLabel: month === "all" ? "All-time" : formatMonthLabel(month),
   };
 }
 
@@ -67,8 +71,27 @@ function formatPnl(value: number) {
   return `₹ ${formatted}`;
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function monthFilterHtml(month: string, months: string[]) {
+  const options = [
+    `<option value="all"${month === "all" ? " selected" : ""}>All months</option>`,
+    ...months.map(
+      (value) =>
+        `<option value="${escapeHtml(value)}"${month === value ? " selected" : ""}>${escapeHtml(formatMonthLabel(value))}</option>`,
+    ),
+  ].join("");
+  return `<form method="get" action="/paper"><label class="block"><span class="mb-1 block text-[11px] font-medium tracking-wide text-slate-500 uppercase">Month</span><select id="paper-month" name="month" onchange="this.form.submit()" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950">${options}</select></label></form>`;
+}
+
 export default function PaperPage({ loaderData }: Route.ComponentProps) {
-  const { paper, month, months, monthPnl, monthLabel } = loaderData;
+  const { paper, months, month, monthPnl, monthLabel } = loaderData;
   const pnlTone =
     monthPnl > 0
       ? "text-emerald-600 dark:text-emerald-400"
@@ -84,10 +107,16 @@ export default function PaperPage({ loaderData }: Route.ComponentProps) {
             Paper trades
           </h1>
           <p className="mt-1.5 max-w-2xl text-sm leading-snug text-slate-500 dark:text-slate-400">
-            Closed trade history. Live open positions are on the Market Watch
-            home page. Simulation only — no real orders.
+            Closed trade history against a ₹1 lakh wallet. Live open positions
+            are on the Market Watch home page. Simulation only — no real orders.
           </p>
         </header>
+
+        {paper.wallet ? (
+          <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-3 sm:p-4 dark:border-slate-800 dark:bg-slate-900/70">
+            <WalletStrip wallet={paper.wallet} />
+          </section>
+        ) : null}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-4 dark:border-slate-800 dark:bg-slate-900/70">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -99,25 +128,12 @@ export default function PaperPage({ loaderData }: Route.ComponentProps) {
                 {formatPnl(monthPnl)}
               </p>
             </div>
-            <form method="get" className="sm:w-48">
-              <label className="block">
-                <span className="mb-1 block text-[11px] font-medium tracking-wide text-slate-500 uppercase">
-                  Month
-                </span>
-                <select
-                  name="month"
-                  defaultValue={month}
-                  onChange={(event) => event.currentTarget.form?.requestSubmit()}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
-                >
-                  {months.map((value) => (
-                    <option key={value} value={value}>
-                      {formatMonthLabel(value)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </form>
+            <div
+              className="sm:w-56"
+              dangerouslySetInnerHTML={{
+                __html: monthFilterHtml(month, months),
+              }}
+            />
           </div>
 
           <PaperTradesList trades={paper.trades} />

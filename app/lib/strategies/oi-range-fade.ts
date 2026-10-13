@@ -37,13 +37,20 @@ export const oiRangeFadeStrategy = assertStrategy({
     if (ctx.structure.orbBrokenUp || ctx.structure.orbBrokenDown) return false;
     const nearPut = nearLevelFor(ctx.spot, ctx.structure.putOiSupport, ctx.instrument.id);
     const nearCall = nearLevelFor(ctx.spot, ctx.structure.callOiResistance, ctx.instrument.id);
-    return nearPut || nearCall;
+    const bullOk = nearPut && ctx.spot >= ctx.structure.open;
+    const bearOk = nearCall && ctx.spot <= ctx.structure.open;
+    return Boolean(bullOk || bearOk);
   },
   proposeEntry(ctx) {
     const w = Math.max(1, ctx.widthSteps);
     const nearPut = nearLevelFor(ctx.spot, ctx.structure.putOiSupport, ctx.instrument.id);
     const nearCall = nearLevelFor(ctx.spot, ctx.structure.callOiResistance, ctx.instrument.id);
     if (nearPut === nearCall) return null;
+
+    // Don't sell puts on a red day or calls on a green day — OI walls alone
+    // are not enough when spot has already chosen a side vs the open.
+    if (nearPut && ctx.spot < ctx.structure.open) return null;
+    if (nearCall && ctx.spot > ctx.structure.open) return null;
 
     if (nearPut) {
       const shortKey = strikeKey(-1);

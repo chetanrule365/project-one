@@ -1,5 +1,8 @@
 import type { PlaybookCard as CreditSpread } from "../lib/strategies/registry";
 import type { DayStructure } from "../lib/strategies/types";
+import { marginRequiredInr } from "../lib/lab/margin";
+
+type PlaybookCall = { strategyId: string; name: string; reason: string };
 
 type PlaybookBoardProps = {
   spreads: CreditSpread[];
@@ -7,9 +10,11 @@ type PlaybookBoardProps = {
   hour: number;
   isExpiryDay: boolean;
   inEntryWindow: boolean;
-  pick: { strategyId: string; name: string; reason: string } | null;
+  picks: PlaybookCall[];
   sitReason?: string | null;
   spot: number;
+  instrumentId: string;
+  walletFreeInr?: number;
 };
 
 function formatNumber(value: number, digits = 0) {
@@ -159,11 +164,37 @@ function StructureChips({ structure }: { structure: DayStructure }) {
 function SetupCard({
   spread,
   picked,
+  instrumentId,
+  spot,
+  walletFreeInr,
 }: {
   spread: CreditSpread;
   picked: boolean;
+  instrumentId: string;
+  spot: number;
+  walletFreeInr?: number;
 }) {
-  const status = picked ? "picked" : spread.available ? "eligible" : "blocked";
+  const marginInr = spread.available
+    ? marginRequiredInr({
+        instrumentId,
+        strategyId: spread.strategyId,
+        credit: spread.netCredit,
+        width: spread.width,
+        spot,
+        legCount: spread.legs.length,
+      })
+    : 0;
+  const walletShort =
+    spread.available &&
+    walletFreeInr != null &&
+    marginInr > walletFreeInr + 0.5;
+  const status = walletShort
+    ? "blocked"
+    : picked
+      ? "picked"
+      : spread.available
+        ? "eligible"
+        : "blocked";
 
   return (
     <article
@@ -193,7 +224,13 @@ function SetupCard({
                 : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
           }`}
         >
-          {status === "picked" ? "Pick" : status === "eligible" ? "Go" : "No"}
+          {walletShort
+            ? "Wallet"
+            : status === "picked"
+              ? "Pick"
+              : status === "eligible"
+                ? "Go"
+                : "No"}
         </span>
       </div>
 
@@ -202,7 +239,7 @@ function SetupCard({
           <p className="mt-3 text-sm tabular-nums text-slate-700 dark:text-slate-200">
             {shortLegs(spread)}
           </p>
-          <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+          <dl className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3 sm:grid-cols-4 dark:border-slate-800">
             <div>
               <dt className="text-[10px] tracking-wide text-slate-400 uppercase">
                 {spread.netCredit >= 0 ? "Credit" : "Debit"}
@@ -227,7 +264,21 @@ function SetupCard({
                 {formatNumber(spread.maxLoss, 2)}
               </dd>
             </div>
+            <div>
+              <dt className="text-[10px] tracking-wide text-slate-400 uppercase">
+                Margin ₹
+              </dt>
+              <dd className="mt-0.5 text-sm font-medium tabular-nums text-slate-900 dark:text-white">
+                {formatNumber(marginInr, 0)}
+              </dd>
+            </div>
           </dl>
+          {walletShort && walletFreeInr != null ? (
+            <p className="mt-2 text-xs text-amber-800 dark:text-amber-300">
+              Wallet short — need ₹ {formatNumber(marginInr, 0)}, free ₹{" "}
+              {formatNumber(walletFreeInr, 0)}.
+            </p>
+          ) : null}
         </>
       ) : (
         <p className="mt-3 text-sm leading-snug text-amber-800 dark:text-amber-300">
@@ -244,36 +295,46 @@ export function PlaybookBoard({
   hour,
   isExpiryDay,
   inEntryWindow,
-  pick,
+  picks,
   sitReason,
   spot,
+  instrumentId,
+  walletFreeInr,
 }: PlaybookBoardProps) {
+  const live = picks.length > 0;
   return (
     <div className="space-y-5">
       <section
         className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border px-3 py-2.5 ${
-          pick
+          live
             ? "border-sky-300 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/30"
             : "border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950/40"
         }`}
       >
         <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
-          Auto pick
+          {picks.length > 1 ? "Auto picks" : "Auto pick"}
         </p>
-        <p className="text-sm font-semibold text-slate-900 dark:text-white">
-          {pick ? pick.name : "Sit out"}
-        </p>
-        <p
-          className={`min-w-0 flex-1 text-sm ${
-            pick
-              ? "text-sky-900 dark:text-sky-200"
-              : "text-slate-500 dark:text-slate-400"
-          }`}
-        >
-          {pick
-            ? pick.reason
-            : (sitReason ?? "No setup matches current structure.")}
-        </p>
+        {live ? (
+          <div className="min-w-0 flex-1 space-y-1">
+            {picks.map((call) => (
+              <p key={call.strategyId} className="text-sm text-sky-900 dark:text-sky-200">
+                <span className="font-semibold text-slate-900 dark:text-white">
+                  {call.name}
+                </span>
+                <span className="ml-2">{call.reason}</span>
+              </p>
+            ))}
+          </div>
+        ) : (
+          <>
+            <p className="text-sm font-semibold text-slate-900 dark:text-white">
+              Sit out
+            </p>
+            <p className="min-w-0 flex-1 text-sm text-slate-500 dark:text-slate-400">
+              {sitReason ?? "No setup matches current structure."}
+            </p>
+          </>
+        )}
         <span
           className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
             isExpiryDay
@@ -302,14 +363,17 @@ export function PlaybookBoard({
           <h3 className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
             Setups
           </h3>
-          <p className="text-[11px] text-slate-400">Checked in this order</p>
+          <p className="text-[11px] text-slate-400">Each can be on at once</p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           {spreads.map((spread) => (
             <SetupCard
               key={spread.id}
               spread={spread}
-              picked={pick?.strategyId === spread.id}
+              picked={picks.some((call) => call.strategyId === spread.id)}
+              instrumentId={instrumentId}
+              spot={spot}
+              walletFreeInr={walletFreeInr}
             />
           ))}
         </div>

@@ -59,14 +59,14 @@ function pickInner(ctx: EntryContext): TradeProposal | null {
     const condor = adopt(
       ctx,
       ironCondorStrategy.proposeEntry(ctx),
-      "Expiry iron condor — sell theta, flatten 14:00",
+      "Expiry iron condor — sell theta, flatten 15:00",
     );
     if (condor) return condor;
     if (oiRangeFadeStrategy.isEligible(ctx)) {
       return adopt(
         ctx,
         oiRangeFadeStrategy.proposeEntry(ctx),
-        "Expiry OI credit — fade the wall, flatten 14:00",
+        "Expiry OI credit — fade the wall, flatten 15:00",
       );
     }
     return null;
@@ -81,7 +81,9 @@ function pickInner(ctx: EntryContext): TradeProposal | null {
       );
       if (condor) return condor;
     }
-    if (oiRangeFadeStrategy.isEligible(ctx)) {
+    // Day-before single-side fades only on quiet range days — avoids selling
+    // puts into an already-soft tape just because an OI wall is nearby.
+    if (quietRange(ctx) && oiRangeFadeStrategy.isEligible(ctx)) {
       return adopt(
         ctx,
         oiRangeFadeStrategy.proposeEntry(ctx),
@@ -105,7 +107,7 @@ export const projectOneStrategy = assertStrategy({
   name: "Project One",
   bias: "Credit theta / sit trend days",
   description:
-    "Sell credits only: expiry + day-before (Bank Nifty: last Tuesday of the month). Quiet iron condors on Nifty/Sensex. Flatten by 14:00. Never buy premium.",
+    "Sell credits only: expiry + day-before (Bank Nifty: last Tuesday of the month). Quiet iron condors on Nifty/Sensex. Flat 14:00 normally, 15:00 on expiry. Never buy premium.",
   requiredStrikeKeys(widthSteps) {
     return [
       ...new Set([
@@ -137,10 +139,22 @@ export function isProjectOne(strategyId: string) {
   );
 }
 
+/** Expiry credits keep decaying into the afternoon; non-expiry still flats 14:00. */
+export const PROJECT_ONE_EXPIRY_FLAT_HOUR = 15;
+
 export function projectOneDefaults(input?: {
   credit?: number;
   hour?: number;
+  expirySession?: boolean;
 }): Partial<OpenPosition> {
-  if ((input?.credit ?? 0) > 0) return { ...OI_FADE_DEFAULTS };
-  return { ...IC_DEFAULTS };
+  const base =
+    (input?.credit ?? 0) > 0 ? { ...OI_FADE_DEFAULTS } : { ...IC_DEFAULTS };
+  if (input?.expirySession) {
+    return {
+      ...base,
+      flatByHour: PROJECT_ONE_EXPIRY_FLAT_HOUR,
+      flatByMinute: 0,
+    };
+  }
+  return base;
 }

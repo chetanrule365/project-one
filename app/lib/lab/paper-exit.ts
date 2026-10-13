@@ -9,8 +9,8 @@ export type PaperExitDecision = {
 
 /**
  * Live paper exit: stop, time-stop, take-profit, then flatten.
- * Morning credits flatten at 14:00 so the afternoon reversal can use the slot.
- * Afternoon reversal flats at 15:15.
+ * Non-expiry Project One credits flatten at 14:00. Expiry credits flatten at
+ * 15:00. Sweep / afternoon reversal flats at 15:15.
  */
 export function decidePaperExit(input: {
   strategyId: string;
@@ -22,6 +22,9 @@ export function decidePaperExit(input: {
   pnlPoints: number;
   entryHour?: number | null;
   expirySession?: boolean;
+  spot?: number;
+  reclaimSpot?: number | null;
+  reclaimDir?: "below" | "above" | null;
 }): PaperExitDecision | null {
   const expiryDay = normalizeExpiryDay(input.expiryAt);
   const pastExpiry = input.today > expiryDay;
@@ -59,6 +62,20 @@ export function decidePaperExit(input: {
   const tpFrac = defaults.takeProfitFrac;
   if (tpFrac && input.pnlPoints >= risk * tpFrac) {
     return { pnlPoints: input.pnlPoints, reason: "Take profit 60%" };
+  }
+
+  if (
+    input.spot !== undefined &&
+    input.reclaimSpot != null &&
+    input.reclaimDir
+  ) {
+    const gaveBack =
+      input.reclaimDir === "below"
+        ? input.spot <= input.reclaimSpot
+        : input.spot >= input.reclaimSpot;
+    if (gaveBack) {
+      return { pnlPoints: input.pnlPoints, reason: "Gave back the level" };
+    }
   }
 
   const flatHour = defaults.flatByHour ?? FLAT_BY_HOUR;

@@ -13,13 +13,32 @@ import {
   projectOneStrategy,
 } from "./project-one";
 import {
+  SWEEP_FADE_DEFAULTS,
+  SWEEP_FADE_ID,
+  detectLiquiditySweep,
+  sweepAllowsIndex,
+  sweepBuffer,
+  sweepFadeStrategy,
+  sweepIsFresh,
+  sweepPositionExtras,
+  type SweepBar,
+} from "./liquidity-sweep";
+import { proposalCoversCosts } from "./cost-filter";
+import {
   FLAT_BY_HOUR,
   STOP_LOSS_CREDIT_MULT,
   inMorningEntryWindow,
+  inSweepEntryWindow,
   istClock,
   MORNING_PLAYBOOK_WINDOW,
 } from "./types";
-import type { EntryContext, Strategy, TradeProposal, OpenPosition } from "./types";
+import type {
+  EntryContext,
+  OpenPosition,
+  Strategy,
+  SweepSignal,
+  TradeProposal,
+} from "./types";
 import type { OptionChainRow } from "../dhan/option-chain";
 import {
   INDEX_INSTRUMENTS,
@@ -48,6 +67,7 @@ export type PlaybookSnapshot = {
   hour: number;
   isExpiryDay: boolean;
   inEntryWindow: boolean;
+  picks: Array<{ strategyId: string; name: string; reason: string }>;
   pick: { strategyId: string; name: string; reason: string } | null;
   sitReason: string | null;
   path: Array<{
@@ -75,6 +95,7 @@ export function buildPlaybookSnapshot(
   instrument: IndexInstrument = INDEX_INSTRUMENTS[0],
   prior?: { high: number; low: number; close: number } | null,
   expiry?: string,
+  tape: SweepBar[] = [],
 ): PlaybookSnapshot {
   const subset = chainAroundAtm(rows, spot, 10);
   const maxPain = computeMaxPain(subset);
@@ -102,16 +123,32 @@ export function buildPlaybookSnapshot(
   } else {
     structure.quietDay = true;
   }
-  structure.insidePriorRange = (quote ? quote.open : spot) >= structure.priorLow && (quote ? quote.open : spot) <= structure.priorHigh;
+  structure.insidePriorRange =
+    (quote ? quote.open : spot) >= structure.priorLow &&
+    (quote ? quote.open : spot) <= structure.priorHigh;
 
   const { hour, minute } = istClock();
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
   const weekday = istWeekday(today);
-  const weekdayLabel = new Date(`${today}T12:00:00+05:30`).toLocaleDateString("en-IN", { weekday: "long", timeZone: "Asia/Kolkata" });
+  const weekdayLabel = new Date(`${today}T12:00:00+05:30`).toLocaleDateString("en-IN", {
+    weekday: "long",
+    timeZone: "Asia/Kolkata",
+  });
   const isWeekend = weekday === 0 || weekday === 6;
   const isExpiryDay = liveExpirySession(instrument.id, expiry);
-  const inEntryWindow = !isWeekend && inMorningEntryWindow(hour);
+  const inEntryWindow =
+    !isWeekend && (inMorningEntryWindow(hour) || inSweepEntryWindow(hour, minute));
   const dte = daysToExpiry(instrument.id, today);
+  const sweep = detectLiquiditySweep({
+    bars: tape.filter((bar) => bar.day === today),
+    priorHigh: structure.priorHigh,
+    priorLow: structure.priorLow,
+    putOi: structure.putOiSupport,
+    callOi: structure.callOiResistance,
+    buffer: sweepBuffer(instrument.id),
+    pick: "latest",
+  });
+  const freshSweep = sweep && sweepIsFresh(sweep, hour, minute) ? sweep : null;
 
   const ctx: EntryContext = {
     instrument,
@@ -122,78 +159,158 @@ export function buildPlaybookSnapshot(
     structure,
     rows: subset,
     expirySession: isExpiryDay,
+    sweep: freshSweep,
   };
 
-  const spreads: PlaybookCard[] = STRATEGIES.map((strategy) => {
-    const eligible = strategy.isEligible(ctx);
-    const proposal = eligible ? strategy.proposeEntry(ctx) : null;
-    if (!proposal) {
-      return {
-        id: strategy.id,
-        strategyId: strategy.id,
-        name: strategy.name,
-        bias: strategy.bias,
-        description: strategy.description,
-        legs: [],
-        netCredit: 0,
-        maxProfit: 0,
-        maxLoss: 0,
-        width: 0,
-        primaryShortStrike: 0,
-        primaryLongStrike: 0,
-        primaryShortSide: "CE" as const,
-        primaryLongSide: "CE" as const,
-        available: false,
-        reason: eligible
-          ? "No cheap credit — sitting out"
-          : "Outside 10:00–14:00 IST or a trend morning",
-      };
-    }
-    return { ...proposal, id: strategy.id, available: true };
-  });
+  const playbookStrategies: Array<{
+    strategy: Strategy;
+    blocked: string;
+    requireCosts: boolean;
+  }> = [
+    {
+      strategy: projectOneStrategy,
+      blocked: "Outside 10:00–14:00 IST or a trend morning",
+      requireCosts: false,
+    },
+    {
+      strategy: sweepFadeStrategy,
+      blocked: "No failed stop-hunt between 10:00 and 12:00",
+      requireCosts: true,
+    },
+  ];
+
+  const spreads: PlaybookCard[] = playbookStrategies.map(
+    ({ strategy, blocked, requireCosts }) => {
+      const eligible = strategy.isEligible(ctx);
+      const proposal = eligible ? strategy.proposeEntry(ctx) : null;
+      const affordable = proposal
+        ? !requireCosts || proposalCoversCosts(proposal, instrument.id).ok
+        : false;
+      if (!proposal || !affordable) {
+        return {
+          id: strategy.id,
+          strategyId: strategy.id,
+          name: strategy.name,
+          bias: strategy.bias,
+          description: strategy.description,
+          legs: [],
+          netCredit: 0,
+          maxProfit: 0,
+          maxLoss: 0,
+          width: 0,
+          primaryShortStrike: 0,
+          primaryLongStrike: 0,
+          primaryShortSide: "CE" as const,
+          primaryLongSide: "CE" as const,
+          available: false,
+          reason:
+            proposal && !affordable
+              ? "Credit does not cover costs"
+              : eligible
+                ? "No cheap credit — sitting out"
+                : blocked,
+        };
+      }
+      return { ...proposal, id: strategy.id, available: true };
+    },
+  );
 
   const live = !isWeekend && inEntryWindow;
-  const picked = live ? pickPlaybookPath(ctx) : null;
-  const sitReason = picked
-    ? null
-    : isWeekend
-      ? `${weekdayLabel} — market closed. Sitting out.`
-      : !inEntryWindow
-        ? `Outside ${MORNING_PLAYBOOK_WINDOW} IST. Sitting out.`
-        : isMonthlyExpiryIndex(instrument.id) && dte > 1
-          ? "Bank Nifty monthly expiry — sitting until the last-Tuesday week."
-          : "Project One has no edge here — sitting out.";
+  const picks = live ? pickPlaybookEntries(ctx) : [];
+  const sitReason =
+    picks.length > 0
+      ? null
+      : isWeekend
+        ? `${weekdayLabel} — market closed. Sitting out.`
+        : !inEntryWindow
+          ? `Outside ${MORNING_PLAYBOOK_WINDOW} IST. Sitting out.`
+          : isMonthlyExpiryIndex(instrument.id) && dte > 1
+            ? "Bank Nifty monthly expiry — sitting until the last-Tuesday week."
+            : "Project One has no edge here — sitting out.";
 
-  const path = STRATEGIES.map((strategy) => {
+  const path = playbookStrategies.map(({ strategy }) => {
     const card = spreads.find((s) => s.id === strategy.id);
-    const status = picked?.strategy.id === strategy.id ? ("picked" as const) : card?.available ? ("eligible" as const) : ("blocked" as const);
+    const status = picks.some((pick) => pick.strategy.id === strategy.id)
+      ? ("picked" as const)
+      : card?.available
+        ? ("eligible" as const)
+        : ("blocked" as const);
     return { id: strategy.id, name: strategy.name, status };
   });
 
-  return { spreads, structure, hour, isExpiryDay, inEntryWindow, pick: picked ? { strategyId: picked.strategy.id, name: picked.strategy.name, reason: picked.reason } : null, sitReason, path };
+  const pickCards = picks.map((pick) => ({
+    strategyId: pick.strategy.id,
+    name: pick.strategy.name,
+    reason: pick.reason,
+  }));
+  return {
+    spreads,
+    structure,
+    hour,
+    isExpiryDay,
+    inEntryWindow,
+    picks: pickCards,
+    pick: pickCards[0] ?? null,
+    sitReason,
+    path,
+  };
 }
 
 export function autoPlaybookStrategyIds() {
-  return [PROJECT_ONE_ID];
+  return [PROJECT_ONE_ID, SWEEP_FADE_ID];
+}
+
+/** Strategies shown in the backtest dropdown (includes a Both option). */
+export function listBacktestStrategies() {
+  return [
+    { id: PROJECT_ONE_ID, name: projectOneStrategy.name },
+    { id: SWEEP_FADE_ID, name: sweepFadeStrategy.name },
+    { id: "BOTH", name: "Both (Project One + Sweep)" },
+  ];
+}
+
+export function pickPlaybookEntries(
+  ctx: EntryContext,
+): Array<{ strategy: Strategy; proposal: TradeProposal; reason: string }> {
+  const picks: Array<{ strategy: Strategy; proposal: TradeProposal; reason: string }> = [];
+  if (projectOneStrategy.isEligible(ctx)) {
+    const proposal = projectOneStrategy.proposeEntry(ctx);
+    if (proposal) {
+      picks.push({
+        strategy: projectOneStrategy,
+        proposal,
+        reason: proposal.description,
+      });
+    }
+  }
+  if (sweepFadeStrategy.isEligible(ctx) && sweepAllowsIndex(ctx)) {
+    const proposal = sweepFadeStrategy.proposeEntry(ctx);
+    if (proposal && proposalCoversCosts(proposal, ctx.instrument.id).ok) {
+      picks.push({
+        strategy: sweepFadeStrategy,
+        proposal,
+        reason: proposal.description,
+      });
+    }
+  }
+  return picks;
 }
 
 export function pickPlaybookPath(
   ctx: EntryContext,
   _strategyIds?: string[],
 ): { strategy: Strategy; proposal: TradeProposal; reason: string } | null {
-  const strategy = projectOneStrategy;
-  if (!strategy.isEligible(ctx)) return null;
-  const proposal = strategy.proposeEntry(ctx);
-  if (!proposal) return null;
-  return { strategy, proposal, reason: proposal.description };
+  return pickPlaybookEntries(ctx)[0] ?? null;
 }
 
 export function positionDefaults(
   strategyId: string,
-  _expirySession?: boolean,
-  opts?: { credit?: number; hour?: number },
+  expirySession?: boolean,
+  opts?: { credit?: number; hour?: number; sweep?: SweepSignal | null },
 ): Partial<OpenPosition> {
-  if (isProjectOne(strategyId)) return projectOneDefaults(opts);
+  if (isProjectOne(strategyId)) {
+    return projectOneDefaults({ ...opts, expirySession });
+  }
   switch (strategyId) {
     case "IRON_CONDOR":
       return { ...IC_DEFAULTS, flatByHour: FLAT_BY_HOUR };
@@ -203,6 +320,8 @@ export function positionDefaults(
       return MAX_PAIN_DEFAULTS;
     case "OI_RANGE_FADE":
       return { ...OI_FADE_DEFAULTS, flatByHour: FLAT_BY_HOUR };
+    case SWEEP_FADE_ID:
+      return { ...SWEEP_FADE_DEFAULTS, ...sweepPositionExtras(opts?.sweep) };
     case "PM_SR_REVERSAL":
       return PM_SR_DEFAULTS;
     default:
@@ -211,6 +330,7 @@ export function positionDefaults(
 }
 
 export function getStrategy(id: string) {
+  if (id === SWEEP_FADE_ID) return sweepFadeStrategy;
   if (isProjectOne(id)) return projectOneStrategy;
   return (
     STRATEGIES.find((s) => s.id === id) ??

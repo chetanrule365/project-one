@@ -1,5 +1,13 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Form, useLocation, useNavigation, useRevalidator } from "react-router";
+import {
+  Form,
+  useLocation,
+  useNavigation,
+  useRevalidator,
+  useRouteLoaderData,
+} from "react-router";
+import { WalletStrip } from "./WalletStrip";
+import type { WalletSnapshot } from "../lib/lab/wallet";
 
 const links = [
   { to: "/", label: "Market Watch", hint: "Live index quotes", end: true },
@@ -49,6 +57,10 @@ function MenuIcon({ open }: { open: boolean }) {
 
 function SidebarNav() {
   const { pathname } = useLocation();
+  const root = useRouteLoaderData("root") as
+    | { wallet?: WalletSnapshot }
+    | undefined;
+  const wallet = root?.wallet;
 
   return (
     <nav className="flex h-full flex-col">
@@ -87,6 +99,11 @@ function SidebarNav() {
         })}
       </ul>
       <div className="border-t border-slate-200 p-3 dark:border-slate-800">
+        {wallet ? (
+          <div className="mb-3">
+            <WalletStrip wallet={wallet} compact />
+          </div>
+        ) : null}
         <Form method="post" action="/login">
           <input type="hidden" name="intent" value="logout" />
           <button
@@ -122,6 +139,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const id = window.setInterval(() => {
       if (revalidatorStateRef.current === "idle") revalidateRef.current();
     }, 1000);
+    return () => window.clearInterval(id);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!location.pathname.startsWith("/strategies")) return;
+    const id = window.setInterval(() => {
+      if (revalidatorStateRef.current === "idle") revalidateRef.current();
+    }, 60_000);
     return () => window.clearInterval(id);
   }, [location.pathname]);
 

@@ -21,7 +21,7 @@ const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 export function istParts(timestampSec: number) {
   const ist = new Date(timestampSec * 1000 + IST_OFFSET_MS);
   const day = `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, "0")}-${String(ist.getUTCDate()).padStart(2, "0")}`;
-  return { day, hour: ist.getUTCHours() };
+  return { day, hour: ist.getUTCHours(), minute: ist.getUTCMinutes() };
 }
 
 export function istWeekday(day: string) {

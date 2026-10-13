@@ -3,7 +3,7 @@ import { loadOptionChainPage } from "../dhan/option-chain";
 import { fetchIndexQuotes, fetchPriorSessionStats } from "../dhan/quotes";
 import {
   getStrategy,
-  pickPlaybookPath,
+  pickPlaybookEntries,
 } from "../strategies/registry";
 import { isProjectOne, PROJECT_ONE_ID } from "../strategies/project-one";
 import {
@@ -18,20 +18,28 @@ import {
 } from "../strategies/expiry-day";
 import {
   DEFAULT_WIDTH_STEPS,
-  IC_SPAN_NOTIONAL_FRAC,
   inMorningEntryWindow,
+  inSweepEntryWindow,
   istClock,
   lotSizeFor,
   MORNING_PLAYBOOK_WINDOW,
   type OpenPosition,
   type Strategy,
 } from "../strategies/types";
+import { loadTodaySweepBars } from "../dhan/intraday-5m";
+import {
+  detectLiquiditySweep,
+  SWEEP_FADE_ID,
+  sweepBuffer,
+  sweepIsFresh,
+  sweepPositionExtras,
+} from "../strategies/liquidity-sweep";
 import { decidePaperExit } from "./paper-exit";
 import {
   closeTrade,
   getActiveRun,
-  getOpenTrade,
   insertOpenTrade,
+  listOpenTrades,
   listActiveRuns,
   listAllPaperRuns,
   listAllPaperTrades,
@@ -44,6 +52,12 @@ import {
 import {
   exitPremiumsFromChain,
 } from "./paper-position";
+import { marginRequiredInr } from "./margin";
+import {
+  canAffordMargin,
+  walletFromPaperTrades,
+  type WalletSnapshot,
+} from "./wallet";
 
 
 function hourIst() {
@@ -54,12 +68,10 @@ function minuteIst() {
   return istClock().minute;
 }
 
-
 /**
  * Capital blocked in ₹ for 1 lot.
- * Buys: premium paid.
- * Iron condor: Dhan-style SPAN (~4.4% of notional, ~₹70k on Nifty).
- * Other credit spreads: defined-risk max loss (width − credit).
+ * Buys: premium paid. 4-leg IC: Dhan SPAN (~4.4% of notional).
+ * 2-leg credits: defined-risk max loss (width − credit).
  */
 export function marginConsumedInr(trade: {
   instrument_id?: string;
@@ -67,17 +79,17 @@ export function marginConsumedInr(trade: {
   credit: number;
   width: number;
   spot_entry?: number;
+  legs?: Array<unknown>;
+  legCount?: number;
 }) {
-  const lot = lotSizeFor(trade.instrument_id ?? "NIFTY");
-  // Use the same margin calculation for all strategies: span-based margin when
-  // `spot_entry` is available (uniform notional fraction), else fall back to
-  // sensible defaults based on net credit/width.
-  if (trade.spot_entry) {
-    return trade.spot_entry * lot * IC_SPAN_NOTIONAL_FRAC;
-  }
-  const debit = trade.credit < 0;
-  if (debit) return Math.abs(trade.credit) * lot;
-  return Math.max(0, trade.width - trade.credit) * lot;
+  return marginRequiredInr({
+    instrumentId: trade.instrument_id,
+    strategyId: trade.strategy_id,
+    credit: trade.credit,
+    width: trade.width,
+    spot: trade.spot_entry,
+    legCount: trade.legCount ?? trade.legs?.length,
+  });
 }
 
 export function currentMonthIst() {
@@ -132,7 +144,13 @@ export function getPaperSnapshot() {
     active: activeRuns[0],
     runs,
     trades,
+    wallet: walletFromPaperTrades(trades),
   };
+}
+
+/** Shared ₹1 lakh paper wallet across all always-on index runs. */
+export function getPaperWallet(): WalletSnapshot {
+  return getPaperSnapshot().wallet;
 }
 
 /**
@@ -140,9 +158,8 @@ export function getPaperSnapshot() {
  * Marks are refreshed by the paper worker each sync tick.
  */
 export function getLivePaperTrades() {
-  const trades = getPaperSnapshot().trades.filter(
-    (trade) => trade.status === "open",
-  );
+  const snapshot = getPaperSnapshot();
+  const trades = snapshot.trades.filter((trade) => trade.status === "open");
   const totalPnlInr = trades.reduce(
     (sum, trade) => sum + (trade.mark_pnl_inr ?? 0),
     0,
@@ -153,7 +170,7 @@ export function getLivePaperTrades() {
       .filter((value): value is string => Boolean(value))
       .sort()
       .at(-1) ?? null;
-  return { trades, totalPnlInr, asOf };
+  return { trades, totalPnlInr, asOf, wallet: snapshot.wallet };
 }
 
 /** Always-on paper: one Project One run per index. No start/stop required. */
@@ -268,20 +285,30 @@ export async function syncPaper(run?: PaperRun): Promise<{
   const today = todayIst();
   const hour = hourIst();
   const minute = minuteIst();
-  const open = getOpenTrade(active.id);
-  let closed: PaperTrade | null = null;
-  let opened: PaperTrade | null = null;
+  const closedTrades: PaperTrade[] = [];
+  const openedTrades: PaperTrade[] = [];
+  const skippedWallet: Array<{
+    strategyId: string;
+    marginInr: number;
+    freeInr: number;
+  }> = [];
 
-  // Load the chain for the open trade's actual expiry so marks use the right strikes/prices.
-  // For the entry decision we always want the near-expiry chain; cache it separately.
-  const tradeChain = await loadOptionChainPage(instrument, open?.expiry_at ?? null);
-  // Near-expiry chain for entry decisions (may be the same object as tradeChain).
-  const entryChain =
-    !open || tradeChain.expiry === tradeChain.expiries[0]
-      ? tradeChain
-      : await loadOptionChainPage(instrument, null);
+  const chainCache = new Map<
+    string,
+    Awaited<ReturnType<typeof loadOptionChainPage>>
+  >();
+  const chainFor = async (expiry: string | null) => {
+    const key = expiry ?? "";
+    const hit = chainCache.get(key);
+    if (hit) return hit;
+    const page = await loadOptionChainPage(instrument, expiry);
+    chainCache.set(key, page);
+    if (page.expiry) chainCache.set(page.expiry, page);
+    return page;
+  };
 
-  if (open) {
+  for (const open of listOpenTrades(active.id)) {
+    const tradeChain = await chainFor(open.expiry_at);
     const settleStrategy = getStrategy(open.strategy_id) ?? strategies[0];
     const position = positionFromTrade(open);
 
@@ -304,6 +331,9 @@ export async function syncPaper(run?: PaperRun): Promise<{
       pnlPoints,
       entryHour: open.entry_hour,
       expirySession: open.expiry_session,
+      spot: tradeChain.spot,
+      reclaimSpot: open.reclaim_spot,
+      reclaimDir: open.reclaim_dir,
     });
 
     if (decision) {
@@ -313,7 +343,8 @@ export async function syncPaper(run?: PaperRun): Promise<{
         pnlInr: Math.round(decision.pnlPoints * lotSizeFor(instrument.id)),
         exitLegs,
       });
-      closed = listTradesForRun(active.id).find((t) => t.id === open.id) ?? null;
+      const closedTrade = listTradesForRun(active.id).find((t) => t.id === open.id);
+      if (closedTrade) closedTrades.push(closedTrade);
     } else {
       patchTradeMark(open.id, {
         pnlPoints: Math.round(pnlPoints),
@@ -323,29 +354,37 @@ export async function syncPaper(run?: PaperRun): Promise<{
     }
   }
 
-  const stillOpen = getOpenTrade(active.id);
-  if (!stillOpen) {
-    if (!isIstTradingWeekday(today)) {
-      return {
-        run: active,
-        opened: null,
-        closed,
-        message: closed
-          ? "Closed paper trade. Weekend — no new entry."
-          : "Weekend — sitting out.",
-      };
-    }
-    const canEnter = inMorningEntryWindow(hour);
-    if (!canEnter) {
-      return {
-        run: active,
-        opened: null,
-        closed,
-        message: closed
-          ? `Closed paper trade. Outside ${MORNING_PLAYBOOK_WINDOW} IST.`
-          : `Outside ${MORNING_PLAYBOOK_WINDOW} IST. Expiry credits only.`,
-      };
-    }
+  const stillOpen = listOpenTrades(active.id);
+  const openStrategyIds = new Set(stillOpen.map((trade) => trade.strategy_id));
+  const morningOpen = inMorningEntryWindow(hour);
+  const sweepWindow = inSweepEntryWindow(hour, minute);
+  const wantProjectOne = morningOpen && !openStrategyIds.has(PROJECT_ONE_ID);
+  const wantSweep = sweepWindow && !openStrategyIds.has(SWEEP_FADE_ID);
+
+  if (!isIstTradingWeekday(today)) {
+    return {
+      run: active,
+      opened: null,
+      closed: closedTrades.at(-1) ?? null,
+      message: closedTrades.length
+        ? "Closed paper trade. Weekend — no new entry."
+        : "Weekend — sitting out.",
+    };
+  }
+
+  if (!morningOpen && !sweepWindow) {
+    return {
+      run: active,
+      opened: null,
+      closed: closedTrades.at(-1) ?? null,
+      message: closedTrades.length
+        ? `Closed paper trade. Outside ${MORNING_PLAYBOOK_WINDOW} IST.`
+        : `Outside ${MORNING_PLAYBOOK_WINDOW} IST. Expiry credits only.`,
+    };
+  }
+
+  if (wantProjectOne || wantSweep) {
+    const entryChain = await chainFor(null);
 
     let quote:
       | { open: number; high: number; low: number; prevClose: number; price: number }
@@ -378,6 +417,23 @@ export async function syncPaper(run?: PaperRun): Promise<{
       prior,
     });
 
+    let tape: Awaited<ReturnType<typeof loadTodaySweepBars>> = [];
+    try {
+      tape = await loadTodaySweepBars(instrument);
+    } catch {
+      tape = [];
+    }
+    const sweep = detectLiquiditySweep({
+      bars: tape,
+      priorHigh: structure.priorHigh,
+      priorLow: structure.priorLow,
+      putOi: structure.putOiSupport,
+      callOi: structure.callOiResistance,
+      buffer: sweepBuffer(instrument.id),
+      pick: "latest",
+    });
+    const freshSweep = sweep && sweepIsFresh(sweep, hour, minute) ? sweep : null;
+
     const ctx = {
       instrument,
       spot: entryChain.spot,
@@ -387,47 +443,88 @@ export async function syncPaper(run?: PaperRun): Promise<{
       structure,
       rows: subset,
       expirySession: liveExpirySession(instrument.id, entryChain.expiry),
+      sweep: freshSweep,
     };
 
-    const picked = pickPlaybookPath(ctx);
-
-    if (picked) {
-      opened = insertOpenTrade({
-        run_id: active.id,
+    for (const picked of pickPlaybookEntries(ctx)) {
+      if (picked.strategy.id === PROJECT_ONE_ID && !wantProjectOne) continue;
+      if (picked.strategy.id === SWEEP_FADE_ID && !wantSweep) continue;
+      if (openStrategyIds.has(picked.strategy.id)) continue;
+      const extras =
+        picked.strategy.id === SWEEP_FADE_ID
+          ? sweepPositionExtras(ctx.sweep)
+          : {};
+      const marginInr = marginConsumedInr({
+        instrument_id: instrument.id,
         strategy_id: picked.strategy.id,
-        short_strike: picked.proposal.primaryShortStrike,
-        long_strike: picked.proposal.primaryLongStrike,
-        short_side: picked.proposal.primaryShortSide,
-        long_side: picked.proposal.primaryLongSide,
         credit: picked.proposal.netCredit,
         width: picked.proposal.width,
         spot_entry: entryChain.spot,
-        entry_at: new Date().toISOString(),
-        expiry_at: nextExpiryDateIst(instrument.id, today),
-        expiry_session: ctx.expirySession,
-        entry_hour: hour,
-        legs: picked.proposal.legs.map((leg) => ({
-          right: leg.right,
-          strike: leg.strike,
-          strikeKey: leg.strikeKey,
-          qty: leg.qty,
-          premium: leg.premium,
-        })),
+        legs: picked.proposal.legs,
       });
+      const wallet = getPaperWallet();
+      if (!canAffordMargin(wallet.freeInr, marginInr)) {
+        skippedWallet.push({
+          strategyId: picked.strategy.id,
+          marginInr,
+          freeInr: wallet.freeInr,
+        });
+        continue;
+      }
+      openedTrades.push(
+        insertOpenTrade({
+          run_id: active.id,
+          strategy_id: picked.strategy.id,
+          short_strike: picked.proposal.primaryShortStrike,
+          long_strike: picked.proposal.primaryLongStrike,
+          short_side: picked.proposal.primaryShortSide,
+          long_side: picked.proposal.primaryLongSide,
+          credit: picked.proposal.netCredit,
+          width: picked.proposal.width,
+          spot_entry: entryChain.spot,
+          entry_at: new Date().toISOString(),
+          expiry_at: nextExpiryDateIst(instrument.id, today),
+          expiry_session: ctx.expirySession,
+          entry_hour: hour,
+          reclaim_spot: extras.reclaimSpot ?? null,
+          reclaim_dir: extras.reclaimDir ?? null,
+          legs: picked.proposal.legs.map((leg) => ({
+            right: leg.right,
+            strike: leg.strike,
+            strikeKey: leg.strikeKey,
+            qty: leg.qty,
+            premium: leg.premium,
+          })),
+        }),
+      );
+      openStrategyIds.add(picked.strategy.id);
     }
   }
 
+  const opened = openedTrades.at(-1) ?? null;
+  const closed = closedTrades.at(-1) ?? null;
   const clock = `${hour}:${String(minute).padStart(2, "0")}`;
+  const openedLabel = openedTrades.map((trade) => trade.strategy_id).join(" and ");
+  const walletSkip = skippedWallet[0];
+  const walletSkipMessage = walletSkip
+    ? `Wallet short of margin for ${walletSkip.strategyId} (need ₹${Math.round(walletSkip.marginInr).toLocaleString("en-IN")}, free ₹${Math.round(walletSkip.freeInr).toLocaleString("en-IN")}).`
+    : null;
   const message =
-    closed && opened
-      ? `Closed trade and opened ${opened.strategy_id}.`
-      : closed
-        ? "Closed paper trade."
-        : opened
-          ? `Opened ${opened.strategy_id} (${clock} IST).`
-          : stillOpen
-            ? "Open paper trade is still active."
-            : "No expiry credit for current structure — sitting out.";
+    closedTrades.length > 0 && openedTrades.length > 0
+      ? `Closed paper trade and opened ${openedLabel}.`
+      : closedTrades.length > 1
+        ? `Closed ${closedTrades.length} paper trades.`
+        : closedTrades.length === 1
+          ? "Closed paper trade."
+          : openedTrades.length > 0
+            ? `Opened ${openedLabel} (${clock} IST).`
+            : walletSkipMessage
+              ? walletSkipMessage
+              : stillOpen.length > 1
+                ? "Open paper trades are still active."
+                : stillOpen.length === 1
+                  ? "Open paper trade is still active."
+                  : "No expiry credit for current structure — sitting out.";
 
   return { run: active, opened, closed, message };
 }

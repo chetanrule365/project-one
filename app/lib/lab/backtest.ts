@@ -1,16 +1,23 @@
 import type { IndexInstrument } from "../dhan/instruments";
+import { loadSweepBars } from "../dhan/intraday-5m";
 import {
   fetchRollingBundle,
   type RollingBar,
   type RollingProgress,
 } from "../dhan/rolling-options";
 import {
+  detectLiquiditySweep,
+  SWEEP_FADE_ID,
+  sweepBuffer,
+  sweepFadeStrategy,
+  type SweepBar,
+} from "../strategies/liquidity-sweep";
+import {
   autoPlaybookStrategyIds,
   getStrategy,
-  pickPlaybookPath,
   positionDefaults,
 } from "../strategies/registry";
-import { isProjectOne } from "../strategies/project-one";
+import { isProjectOne, projectOneStrategy } from "../strategies/project-one";
 import { isPmSrReversal } from "../strategies/pm-sr-reversal";
 import {
   atmBandKeys,
@@ -25,8 +32,11 @@ import {
   proposalCoversCosts,
   roundTripBrokerageInr,
 } from "../strategies/cost-filter";
+import { marginRequiredInr } from "./margin";
+import { SimWallet, WALLET_START_INR } from "./wallet";
 import {
   DEFAULT_WIDTH_STEPS,
+  inSweepEntryWindow,
   lotSizeFor,
   type OpenPosition,
   type Strategy,
@@ -41,7 +51,9 @@ export type BacktestTrade = {
   entryDay: string;
   expiryDay: string;
   entryHour: number;
+  entryMinute?: number;
   exitHour: number;
+  exitMinute?: number;
   shortStrike: number;
   longStrike: number;
   shortSide: string;
@@ -59,6 +71,7 @@ export type BacktestTrade = {
   legCount?: number;
   brokerageInr?: number;
   pnlAfterBrokerageInr?: number;
+  marginInr?: number;
 };
 
 export type BacktestMetrics = {
@@ -73,6 +86,11 @@ export type BacktestMetrics = {
   profitFactor: number;
   brokerageInr: number;
   totalPnlAfterBrokerageInr: number;
+  avgMarginInr: number;
+  walletStartInr: number;
+  walletEndInr: number;
+  skippedForMargin: number;
+  peakLockedInr: number;
   byStrategy: StrategyNetRow[];
 };
 
@@ -106,6 +124,20 @@ export function tradeBrokerageInr(trade: BacktestTrade) {
   return roundTripBrokerageInr(inferLegCount(trade));
 }
 
+export function tradeMarginInr(trade: BacktestTrade, instrumentId = "NIFTY") {
+  if (trade.marginInr != null && Number.isFinite(trade.marginInr)) {
+    return trade.marginInr;
+  }
+  return marginRequiredInr({
+    instrumentId,
+    strategyId: trade.strategyId,
+    credit: trade.credit,
+    width: trade.width,
+    spot: trade.spotEntry,
+    legCount: inferLegCount(trade),
+  });
+}
+
 export function tradePnlAfterBrokerageInr(trade: BacktestTrade) {
   if (
     trade.pnlAfterBrokerageInr != null &&
@@ -128,7 +160,11 @@ export type BacktestResult = {
   trades: BacktestTrade[];
 };
 
-export function computeMetrics(trades: BacktestTrade[]): BacktestMetrics {
+export function computeMetrics(
+  trades: BacktestTrade[],
+  instrumentId?: string,
+  extras?: { skippedForMargin?: number; peakLockedInr?: number },
+): BacktestMetrics {
   const wins = trades.filter((t) => tradePnlAfterBrokerageInr(t) > 0).length;
   const losses = trades.length - wins;
   const totalPnlPoints = trades.reduce((s, t) => s + t.pnlPoints, 0);
@@ -137,9 +173,10 @@ export function computeMetrics(trades: BacktestTrade[]): BacktestMetrics {
   const nets = trades.map((t) => tradePnlAfterBrokerageInr(t));
   const grossProfit = nets.filter((n) => n > 0).reduce((s, n) => s + n, 0);
   const grossLoss = Math.abs(nets.filter((n) => n < 0).reduce((s, n) => s + n, 0));
+  const totalPnlAfterBrokerageInr = totalPnlInr - brokerageInr;
 
-  let equity = 0;
-  let peak = 0;
+  let equity = WALLET_START_INR;
+  let peak = WALLET_START_INR;
   let maxDrawdownInr = 0;
   for (const net of nets) {
     equity += net;
@@ -159,7 +196,15 @@ export function computeMetrics(trades: BacktestTrade[]): BacktestMetrics {
     profitFactor:
       grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0,
     brokerageInr,
-    totalPnlAfterBrokerageInr: totalPnlInr - brokerageInr,
+    totalPnlAfterBrokerageInr,
+    avgMarginInr: trades.length
+      ? trades.reduce((s, t) => s + tradeMarginInr(t, instrumentId), 0) /
+        trades.length
+      : 0,
+    walletStartInr: WALLET_START_INR,
+    walletEndInr: WALLET_START_INR + totalPnlAfterBrokerageInr,
+    skippedForMargin: extras?.skippedForMargin ?? 0,
+    peakLockedInr: extras?.peakLockedInr ?? 0,
     byStrategy: strategyNetRows(trades),
   };
 }
@@ -204,33 +249,51 @@ function computeMetricsWithoutBreakdown(trades: BacktestTrade[]) {
 }
 
 type HourBar = { hour: number; bar: RollingBar };
-type IndexedSeries = Record<string, Map<string, HourBar[]>>;
+type ClockBar = { hour: number; minute: number; bar: RollingBar };
+type IndexedSeries = Record<string, Map<string, ClockBar[]>>;
+
+function clockMinutes(hour: number, minute: number) {
+  return hour * 60 + minute;
+}
+
+function clockLabel(hour: number, minute: number) {
+  return `${hour}:${String(minute).padStart(2, "0")}`;
+}
 
 function indexSeries(series: Record<string, RollingBar[]>): IndexedSeries {
   const indexed: IndexedSeries = {};
   for (const [key, bars] of Object.entries(series)) {
-    const byDay = new Map<string, Map<number, RollingBar>>();
+    const byDay = new Map<string, Map<number, ClockBar>>();
     for (const bar of bars) {
-      const { day, hour } = istParts(bar.timestamp);
-      let hours = byDay.get(day);
-      if (!hours) {
-        hours = new Map();
-        byDay.set(day, hours);
+      const { day, hour, minute } = istParts(bar.timestamp);
+      let slots = byDay.get(day);
+      if (!slots) {
+        slots = new Map();
+        byDay.set(day, slots);
       }
-      hours.set(hour, bar);
+      slots.set(clockMinutes(hour, minute), { hour, minute, bar });
     }
-    const dayMap = new Map<string, HourBar[]>();
-    for (const [day, hours] of byDay) {
+    const dayMap = new Map<string, ClockBar[]>();
+    for (const [day, slots] of byDay) {
       dayMap.set(
         day,
-        [...hours.entries()]
+        [...slots.entries()]
           .sort((a, b) => a[0] - b[0])
-          .map(([hour, bar]) => ({ hour, bar })),
+          .map(([, row]) => row),
       );
     }
     indexed[key] = dayMap;
   }
   return indexed;
+}
+
+/** One spot per hour so the opening-range check still means the 9:xx hour. */
+function hourlyBars(bars: ClockBar[]): HourBar[] {
+  const byHour = new Map<number, RollingBar>();
+  for (const row of bars) byHour.set(row.hour, row.bar);
+  return [...byHour.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([hour, bar]) => ({ hour, bar }));
 }
 
 function hoursOnIndexed(indexed: IndexedSeries, key: string, day: string) {
@@ -245,10 +308,11 @@ function uniqueDays(indexed: IndexedSeries) {
   return [...set].sort();
 }
 
-function snapshotAtHour(
+function snapshotAt(
   indexed: IndexedSeries,
   day: string,
   hour: number,
+  minute: number,
   strikeKeys: string[],
 ) {
   const premiums: Record<string, number> = {};
@@ -259,10 +323,11 @@ function snapshotAtHour(
   for (const sk of strikeKeys) {
     for (const right of ["CE", "PE"] as const) {
       const key = `${sk}:${right}`;
-      const hours = hoursOnIndexed(indexed, key, day);
-      const bar =
-        hours.find((h) => h.hour === hour)?.bar ??
-        [...hours].reverse().find((h) => h.hour <= hour)?.bar;
+      const slots = hoursOnIndexed(indexed, key, day);
+      const target = clockMinutes(hour, minute);
+      const bar = [...slots]
+        .reverse()
+        .find((row) => clockMinutes(row.hour, row.minute) <= target)?.bar;
       if (!bar) continue;
       premiums[key] = bar.close;
       strikes[sk] = bar.strike;
@@ -278,7 +343,7 @@ function snapshotAtHour(
 }
 
 function priorDayStats(
-  hours: HourBar[],
+  hours: Array<{ bar: RollingBar }>,
 ): { high: number; low: number; close: number; open: number } | null {
   if (hours.length === 0) return null;
   let high = -Infinity;
@@ -310,23 +375,37 @@ function manageIntraday(input: {
   position: OpenPosition;
   day: string;
   entryHour: number;
+  entryMinute: number;
   indexed: IndexedSeries;
   strikeKeys: string[];
 }): {
   pnlPoints: number;
   exitHour: number;
+  exitMinute: number;
   spotExit: number;
   exitReason: string;
 } {
-  const { strategy, proposal, position, day, entryHour, indexed, strikeKeys } =
-    input;
-  const atmHours =
+  const {
+    strategy,
+    proposal,
+    position,
+    day,
+    entryHour,
+    entryMinute,
+    indexed,
+    strikeKeys,
+  } = input;
+  const entryClock = clockMinutes(entryHour, entryMinute);
+  const atmBars =
     hoursOnIndexed(indexed, "ATM:CE", day).length > 0
       ? hoursOnIndexed(indexed, "ATM:CE", day)
       : hoursOnIndexed(indexed, "ATM:PE", day);
-  const manageHours = atmHours.filter((h) => h.hour > entryHour).sort(
-    (a, b) => a.hour - b.hour,
-  );
+  const manageBars = atmBars
+    .filter((row) => clockMinutes(row.hour, row.minute) > entryClock)
+    .sort(
+      (a, b) =>
+        clockMinutes(a.hour, a.minute) - clockMinutes(b.hour, b.minute),
+    );
 
   const isDebit = proposal.netCredit < 0;
   const risk = Math.abs(proposal.netCredit) || proposal.maxLoss || 1;
@@ -337,17 +416,23 @@ function manageIntraday(input: {
     ? risk * position.takeProfitFrac
     : null;
 
-  for (const { hour, bar } of manageHours) {
-    const snap = snapshotAtHour(indexed, day, hour, strikeKeys);
+  for (const { hour, minute, bar } of manageBars) {
+    const snap = snapshotAt(indexed, day, hour, minute, strikeKeys);
     const spot = snap.spot || bar.spot || bar.close;
     const pnl = strategy.settle(position, spot, snap.premiums);
+    const flatHour = position.flatByHour;
+    const flatMinute = position.flatByMinute ?? 0;
 
-    if (position.flatByHour !== undefined && hour >= position.flatByHour) {
+    if (
+      flatHour !== undefined &&
+      clockMinutes(hour, minute) >= clockMinutes(flatHour, flatMinute)
+    ) {
       return {
         pnlPoints: pnl,
         exitHour: hour,
+        exitMinute: minute,
         spotExit: spot,
-        exitReason: `Flat by ${position.flatByHour}:00`,
+        exitReason: `Flat by ${clockLabel(flatHour, flatMinute)}`,
       };
     }
 
@@ -358,6 +443,7 @@ function manageIntraday(input: {
       return {
         pnlPoints: pnl,
         exitHour: hour,
+        exitMinute: minute,
         spotExit: spot,
         exitReason: "Time stop",
       };
@@ -367,15 +453,33 @@ function manageIntraday(input: {
       return {
         pnlPoints: tpLevel,
         exitHour: hour,
+        exitMinute: minute,
         spotExit: spot,
         exitReason: `Take profit ${(position.takeProfitFrac! * 100).toFixed(0)}%`,
       };
+    }
+
+    if (position.reclaimSpot !== undefined && position.reclaimDir) {
+      const gaveBack =
+        position.reclaimDir === "below"
+          ? spot <= position.reclaimSpot
+          : spot >= position.reclaimSpot;
+      if (gaveBack) {
+        return {
+          pnlPoints: pnl,
+          exitHour: hour,
+          exitMinute: minute,
+          spotExit: spot,
+          exitReason: "Gave back the level",
+        };
+      }
     }
 
     if (pnl <= stopLevel) {
       return {
         pnlPoints: stopLevel,
         exitHour: hour,
+        exitMinute: minute,
         spotExit: spot,
         exitReason: isDebit
           ? `Debit stop ${(position.stopMult! * 100).toFixed(0)}%`
@@ -390,6 +494,7 @@ function manageIntraday(input: {
         return {
           pnlPoints: Math.max(pnl, 0),
           exitHour: hour,
+          exitMinute: minute,
           spotExit: spot,
           exitReason: "Hit max-pain target",
         };
@@ -398,6 +503,7 @@ function manageIntraday(input: {
         return {
           pnlPoints: Math.max(pnl, 0),
           exitHour: hour,
+          exitMinute: minute,
           spotExit: spot,
           exitReason: "Hit max-pain target",
         };
@@ -410,6 +516,7 @@ function manageIntraday(input: {
         return {
           pnlPoints: stopLevel,
           exitHour: hour,
+          exitMinute: minute,
           spotExit: spot,
           exitReason: "Adverse spot stop",
         };
@@ -418,6 +525,7 @@ function manageIntraday(input: {
         return {
           pnlPoints: stopLevel,
           exitHour: hour,
+          exitMinute: minute,
           spotExit: spot,
           exitReason: "Adverse spot stop",
         };
@@ -425,18 +533,27 @@ function manageIntraday(input: {
     }
   }
 
-  const last = manageHours[manageHours.length - 1] ?? atmHours[atmHours.length - 1];
+  const last = manageBars[manageBars.length - 1] ?? atmBars[atmBars.length - 1];
   const snap = last
-    ? snapshotAtHour(indexed, day, last.hour, strikeKeys)
+    ? snapshotAt(indexed, day, last.hour, last.minute, strikeKeys)
     : { premiums: {}, spot: 0 };
   const spot = snap.spot || last?.bar.spot || 0;
   return {
     pnlPoints: strategy.settle(position, spot, snap.premiums),
     exitHour: last?.hour ?? entryHour,
+    exitMinute: last?.minute ?? entryMinute,
     spotExit: spot,
     exitReason: "Session end",
   };
 }
+
+type DayFill = {
+  entryMin: number;
+  exitMin: number;
+  marginInr: number;
+  pnlAfterBrokerageInr: number;
+  trade: BacktestTrade;
+};
 
 async function runTradeDays(
   strategies: Strategy[],
@@ -445,9 +562,15 @@ async function runTradeDays(
   widthSteps: number,
   mode: "single" | "auto",
   onProgress?: (progress: RollingProgress) => void,
-): Promise<BacktestTrade[]> {
+  sweepBars: SweepBar[] = [],
+): Promise<{
+  trades: BacktestTrade[];
+  skippedForMargin: number;
+  peakLockedInr: number;
+}> {
   const lot = lotSizeFor(instrument.id);
   const trades: BacktestTrade[] = [];
+  const wallet = new SimWallet();
   const strikeKeys = atmBandKeys(4);
   const indexed = indexSeries(series);
   const days = uniqueDays(indexed);
@@ -465,6 +588,9 @@ async function runTradeDays(
     Boolean(primary && isProjectOne(primary.id)) || mode === "auto";
   const pmOnly =
     mode === "single" && Boolean(primary && isPmSrReversal(primary.id));
+  // Sweep only when Auto picks both, or Sweep is explicitly selected.
+  const includeSweep =
+    mode === "auto" || strategies.some((strategy) => strategy.id === SWEEP_FADE_ID);
 
   let dayIndex = 0;
   for (const day of days) {
@@ -483,13 +609,15 @@ async function runTradeDays(
     const priorStats = prior
       ? priorDayStats(hoursOnIndexed(indexed, atmKey, prior))
       : null;
-    const dayHours = hoursOnIndexed(indexed, atmKey, day);
+    const dayClock = hoursOnIndexed(indexed, atmKey, day);
+    const dayHours = hourlyBars(dayClock);
     if (dayHours.length < 2) continue;
 
-    const openBar = dayHours[0];
+    const openBar = dayClock[0] ?? dayHours[0];
     const open = openBar.bar.spot || openBar.bar.close;
 
     const slots = pmOnly ? [14] : [10, 11];
+    const fills: DayFill[] = [];
 
     let busyUntil = -1;
     for (const slotHour of slots) {
@@ -502,12 +630,15 @@ async function runTradeDays(
       if (slotHour === 14 && decisionHour < 14) continue;
       if (decisionHour < busyUntil) continue;
 
-      const snap = snapshotAtHour(indexed, day, decisionHour, strikeKeys);
+      const snap = snapshotAt(indexed, day, decisionHour, 0, strikeKeys);
       if (!snap.spot) continue;
 
       const maxPain = maxPainFromSnapshot(snap.strikes, snap.oiByKey);
       const walls = oiWallsFromSnapshot(snap.strikes, snap.oiByKey);
-      const knownHours = dayHours.filter((h) => h.hour <= decisionHour);
+      const knownClock = dayClock.filter(
+        (row) => clockMinutes(row.hour, row.minute) <= clockMinutes(decisionHour, 0),
+      );
+      const knownHours = hourlyBars(knownClock);
       const structure = buildDayStructure({
         day,
         spot: snap.spot,
@@ -523,7 +654,7 @@ async function runTradeDays(
 
       let sessionHigh = open;
       let sessionLow = open;
-      for (const { bar } of knownHours) {
+      for (const { bar } of knownClock) {
         const px = bar.spot || bar.close;
         if (!px) continue;
         sessionHigh = Math.max(sessionHigh, px);
@@ -555,7 +686,16 @@ async function runTradeDays(
       } | null = null;
 
       if (mode === "auto" || projectOne) {
-        picked = pickPlaybookPath(ctx, strategies.map((s) => s.id));
+        if (projectOneStrategy.isEligible(ctx)) {
+          const proposal = projectOneStrategy.proposeEntry(ctx);
+          if (proposal) {
+            picked = {
+              strategy: projectOneStrategy,
+              proposal,
+              reason: proposal.description,
+            };
+          }
+        }
       } else {
         const strategy = strategies[0];
         if (strategy?.isEligible(ctx)) {
@@ -595,6 +735,7 @@ async function runTradeDays(
         position,
         day,
         entryHour: decisionHour,
+        entryMinute: 0,
         indexed,
         strikeKeys,
       });
@@ -602,36 +743,216 @@ async function runTradeDays(
       const legCount = picked.proposal.legs.length;
       const pnlInr = managed.pnlPoints * lot;
       const brokerageInr = roundTripBrokerageInr(legCount);
-      trades.push({
+      const marginInr = marginRequiredInr({
+        instrumentId: instrument.id,
         strategyId: picked.strategy.id,
-        strategyName: picked.strategy.name,
-        entryDay: day,
-        expiryDay: day,
-        entryHour: decisionHour,
-        exitHour: managed.exitHour,
-        shortStrike: picked.proposal.primaryShortStrike,
-        longStrike: picked.proposal.primaryLongStrike,
-        shortSide: picked.proposal.primaryShortSide,
-        longSide: picked.proposal.primaryLongSide,
         credit: picked.proposal.netCredit,
         width: picked.proposal.width,
-        spotEntry: snap.spot,
-        spotExpiry: managed.spotExit,
-        pnlPoints: managed.pnlPoints,
-        pnlInr,
-        won: pnlInr - brokerageInr > 0,
-        pickReason: picked.reason,
-        exitReason: managed.exitReason,
-        expirySession: Boolean(ctx.expirySession),
+        spot: snap.spot,
         legCount,
-        brokerageInr,
+      });
+      const exitMinute = managed.exitMinute ?? 0;
+      fills.push({
+        entryMin: clockMinutes(decisionHour, 0),
+        exitMin: clockMinutes(managed.exitHour, exitMinute),
+        marginInr,
         pnlAfterBrokerageInr: pnlInr - brokerageInr,
+        trade: {
+          strategyId: picked.strategy.id,
+          strategyName: picked.strategy.name,
+          entryDay: day,
+          expiryDay: day,
+          entryHour: decisionHour,
+          entryMinute: 0,
+          exitHour: managed.exitHour,
+          exitMinute,
+          shortStrike: picked.proposal.primaryShortStrike,
+          longStrike: picked.proposal.primaryLongStrike,
+          shortSide: picked.proposal.primaryShortSide,
+          longSide: picked.proposal.primaryLongSide,
+          credit: picked.proposal.netCredit,
+          width: picked.proposal.width,
+          spotEntry: snap.spot,
+          spotExpiry: managed.spotExit,
+          pnlPoints: managed.pnlPoints,
+          pnlInr,
+          won: pnlInr - brokerageInr > 0,
+          pickReason: picked.reason,
+          exitReason: managed.exitReason,
+          expirySession: Boolean(ctx.expirySession),
+          legCount,
+          brokerageInr,
+          pnlAfterBrokerageInr: pnlInr - brokerageInr,
+          marginInr,
+        },
       });
       busyUntil = managed.exitHour;
     }
+
+    if (!pmOnly && includeSweep) {
+      const dayTape = sweepBars.filter((bar) => bar.day === day);
+      const snap10 = snapshotAt(indexed, day, 10, 0, strikeKeys);
+      const walls10 = oiWallsFromSnapshot(snap10.strikes, snap10.oiByKey);
+      const signal =
+        dayTape.length > 0
+          ? detectLiquiditySweep({
+              bars: dayTape,
+              priorHigh: priorStats?.high ?? 0,
+              priorLow: priorStats?.low ?? 0,
+              putOi: walls10.putSupport,
+              callOi: walls10.callResist,
+              buffer: sweepBuffer(instrument.id),
+            })
+          : null;
+      const entryTotal = signal
+        ? signal.hour * 60 + signal.minute + 5
+        : 0;
+      const entryHour = Math.floor(entryTotal / 60);
+      const entryMinute = entryTotal % 60;
+      const snap =
+        signal && inSweepEntryWindow(entryHour, entryMinute)
+          ? snapshotAt(indexed, day, entryHour, entryMinute, strikeKeys)
+          : null;
+      if (signal && snap?.spot) {
+        const knownHours = hourlyBars(
+          dayClock.filter(
+            (row) =>
+              clockMinutes(row.hour, row.minute) <=
+              clockMinutes(entryHour, entryMinute),
+          ),
+        );
+        const maxPain = maxPainFromSnapshot(snap.strikes, snap.oiByKey);
+        const walls = oiWallsFromSnapshot(snap.strikes, snap.oiByKey);
+        const structure = buildDayStructure({
+          day,
+          spot: snap.spot,
+          open,
+          priorHigh: priorStats?.high ?? snap.spot * 1.01,
+          priorLow: priorStats?.low ?? snap.spot * 0.99,
+          priorClose: priorStats?.close ?? snap.spot,
+          morningBars: knownHours,
+          maxPain,
+          putOiSupport: walls.putSupport,
+          callOiResistance: walls.callResist,
+        });
+        const ctx = {
+          instrument,
+          spot: snap.spot,
+          widthSteps,
+          hour: entryHour,
+          minute: entryMinute,
+          structure,
+          premiums: snap.premiums,
+          strikes: snap.strikes,
+          expirySession: isExpirySession(instrument.id, day, days),
+          sweep: signal,
+        };
+        const proposal = sweepFadeStrategy.isEligible(ctx)
+          ? sweepFadeStrategy.proposeEntry(ctx)
+          : null;
+        if (proposal && proposalCoversCosts(proposal, instrument.id).ok) {
+          const defaults = positionDefaults(
+            sweepFadeStrategy.id,
+            ctx.expirySession,
+            {
+              credit: proposal.netCredit,
+              hour: entryHour,
+              sweep: signal,
+            },
+          );
+          const position: OpenPosition = {
+            strategyId: sweepFadeStrategy.id,
+            legs: proposal.legs,
+            netCredit: proposal.netCredit,
+            width: proposal.width,
+            entryAt: day,
+            expiryAt: day,
+            entryHour,
+            ...defaults,
+          };
+          const managed = manageIntraday({
+            strategy: sweepFadeStrategy,
+            proposal,
+            position,
+            day,
+            entryHour,
+            entryMinute,
+            indexed,
+            strikeKeys,
+          });
+          const legCount = proposal.legs.length;
+          const pnlInr = managed.pnlPoints * lot;
+          const brokerageInr = roundTripBrokerageInr(legCount);
+          const marginInr = marginRequiredInr({
+            instrumentId: instrument.id,
+            strategyId: sweepFadeStrategy.id,
+            credit: proposal.netCredit,
+            width: proposal.width,
+            spot: snap.spot,
+            legCount,
+          });
+          const exitMinute = managed.exitMinute ?? 0;
+          fills.push({
+            entryMin: clockMinutes(entryHour, entryMinute),
+            exitMin: clockMinutes(managed.exitHour, exitMinute),
+            marginInr,
+            pnlAfterBrokerageInr: pnlInr - brokerageInr,
+            trade: {
+              strategyId: sweepFadeStrategy.id,
+              strategyName: sweepFadeStrategy.name,
+              entryDay: day,
+              expiryDay: day,
+              entryHour,
+              entryMinute,
+              exitHour: managed.exitHour,
+              exitMinute,
+              shortStrike: proposal.primaryShortStrike,
+              longStrike: proposal.primaryLongStrike,
+              shortSide: proposal.primaryShortSide,
+              longSide: proposal.primaryLongSide,
+              credit: proposal.netCredit,
+              width: proposal.width,
+              spotEntry: snap.spot,
+              spotExpiry: managed.spotExit,
+              pnlPoints: managed.pnlPoints,
+              pnlInr,
+              won: pnlInr - brokerageInr > 0,
+              pickReason: proposal.description,
+              exitReason: managed.exitReason,
+              expirySession: Boolean(ctx.expirySession),
+              legCount,
+              brokerageInr,
+              pnlAfterBrokerageInr: pnlInr - brokerageInr,
+              marginInr,
+            },
+          });
+        }
+      }
+    }
+
+    fills.sort((a, b) => a.entryMin - b.entryMin);
+    const dayBase = dayIndex * 20_000;
+    for (const fill of fills) {
+      if (
+        !wallet.tryOpen(
+          dayBase + fill.entryMin,
+          fill.marginInr,
+          dayBase + fill.exitMin,
+          fill.pnlAfterBrokerageInr,
+        )
+      ) {
+        continue;
+      }
+      trades.push(fill.trade);
+    }
   }
 
-  return trades;
+  wallet.settle();
+  return {
+    trades,
+    skippedForMargin: wallet.skipped,
+    peakLockedInr: wallet.peakLockedInr,
+  };
 }
 
 export async function runBacktest(input: {
@@ -661,6 +982,8 @@ export async function runBacktest(input: {
   }
 
   const mode: "single" | "auto" = strategies.length > 1 ? "auto" : "single";
+  const wantSweep =
+    mode === "auto" || strategies.some((strategy) => strategy.id === SWEEP_FADE_ID);
 
   const strikeKeys = [
     ...new Set([
@@ -679,15 +1002,33 @@ export async function runBacktest(input: {
     from,
     to,
     input.onProgress,
+    5,
   );
 
-  const trades = await runTradeDays(
+  let sweepBars: SweepBar[] = [];
+  if (wantSweep) {
+    input.onProgress?.({
+      done: 0,
+      total: 1,
+      cached: 0,
+      fetched: 0,
+      label: "Reading 5-minute sweep tape",
+    });
+    try {
+      sweepBars = await loadSweepBars(input.instrument, from, to);
+    } catch (error) {
+      console.error("[sweep] 5-minute tape unavailable", error);
+    }
+  }
+
+  const simulated = await runTradeDays(
     strategies,
     input.instrument,
     series,
     widthSteps,
     mode,
     input.onProgress,
+    sweepBars,
   );
 
   return {
@@ -698,8 +1039,11 @@ export async function runBacktest(input: {
     to: to.toISOString().slice(0, 10),
     lotSize: lotSizeFor(input.instrument.id),
     mode,
-    metrics: computeMetrics(trades),
-    trades,
+    metrics: computeMetrics(simulated.trades, input.instrument.id, {
+      skippedForMargin: simulated.skippedForMargin,
+      peakLockedInr: simulated.peakLockedInr,
+    }),
+    trades: simulated.trades,
   };
 }
 

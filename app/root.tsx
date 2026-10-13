@@ -11,6 +11,7 @@ import {
 import type { Route } from "./+types/root";
 import { AppShell } from "./components/AppShell";
 import { hasPin, hydratePinFromRequest } from "./lib/dhan/pin";
+import { getPaperWallet } from "./lib/lab/paper";
 import { bootCloudStores } from "./lib/store/boot";
 import { safeNextPath } from "./lib/next-path";
 import "./app.css";
@@ -24,7 +25,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     const next = safeNextPath(url.pathname + url.search);
     throw redirect(`/login?next=${encodeURIComponent(next)}`);
   }
-  return { unlocked: true };
+  return { unlocked: true, wallet: getPaperWallet() };
 }
 
 export const links: Route.LinksFunction = () => [

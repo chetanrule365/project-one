@@ -70,9 +70,15 @@ export function listBacktests(): Array<{
   totalPnlInr: number;
   brokerageInr: number;
   totalPnlAfterBrokerageInr: number;
+  avgMarginInr: number;
+  walletEndInr: number;
+  skippedForMargin: number;
 }> {
   return load().runs.map((run) => {
-    const metrics = computeMetrics(run.trades);
+    const metrics = computeMetrics(run.trades, run.instrumentId, {
+      skippedForMargin: run.metrics?.skippedForMargin,
+      peakLockedInr: run.metrics?.peakLockedInr,
+    });
     return {
       id: run.id,
       savedAt: run.savedAt,
@@ -85,6 +91,9 @@ export function listBacktests(): Array<{
       totalPnlInr: metrics.totalPnlInr,
       brokerageInr: metrics.brokerageInr,
       totalPnlAfterBrokerageInr: metrics.totalPnlAfterBrokerageInr,
+      avgMarginInr: metrics.avgMarginInr,
+      walletEndInr: metrics.walletEndInr,
+      skippedForMargin: metrics.skippedForMargin,
     };
   });
 }
@@ -92,5 +101,11 @@ export function listBacktests(): Array<{
 export function getBacktest(id: number): SavedBacktest | null {
   const run = load().runs.find((row) => row.id === id);
   if (!run) return null;
-  return { ...run, metrics: computeMetrics(run.trades) };
+  return {
+    ...run,
+    metrics: computeMetrics(run.trades, run.instrumentId, {
+      skippedForMargin: run.metrics?.skippedForMargin,
+      peakLockedInr: run.metrics?.peakLockedInr,
+    }),
+  };
 }

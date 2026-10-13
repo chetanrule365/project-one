@@ -14,6 +14,8 @@ export function createJsonStore<T>(opts: {
   remote?: "kv" | "blob";
 }) {
   let cache: T | null = null;
+  /** mtime of the file when `cache` was last read/written (worker may update disk out-of-process). */
+  let cacheMtimeMs = 0;
   let remoteReady = false;
   let hydrating: Promise<void> | null = null;
   let remoteTimer: ReturnType<typeof setTimeout> | null = null;
@@ -41,12 +43,30 @@ export function createJsonStore<T>(opts: {
     }
   }
 
+  /** Prefer higher nextId then more runs so a remote empty clear cannot wipe a richer local save. */
+  function contentRank(state: unknown): number {
+    if (!state || typeof state !== "object") return 0;
+    const s = state as { nextId?: number; runs?: unknown[] };
+    const nextId = typeof s.nextId === "number" ? s.nextId : 0;
+    const runs = Array.isArray(s.runs) ? s.runs.length : 0;
+    if (nextId || runs) return nextId * 1_000_000 + runs;
+    return 0;
+  }
+
   function writeLocal(state: T) {
     try {
       writeFileSync(filePath(), JSON.stringify(state, null, 2));
+      cacheMtimeMs = localMtimeMs();
     } catch (error) {
       console.error(`[store] failed to write ${opts.fileName}`, error);
     }
+  }
+
+  function refreshFromDiskIfNewer() {
+    const mtime = localMtimeMs();
+    if (cache && mtime <= cacheMtimeMs) return;
+    cache = readLocal();
+    cacheMtimeMs = mtime;
   }
 
   async function hydrate() {
@@ -77,15 +97,23 @@ export function createJsonStore<T>(opts: {
       }
       if (remote.value) {
         const remoteAt = Date.parse(remote.updatedAt ?? "") || 0;
-        if (remoteAt >= localMtimeMs()) {
-          cache = { ...opts.empty(), ...remote.value };
+        const local = readLocal();
+        const merged = { ...opts.empty(), ...remote.value };
+        if (contentRank(local) > contentRank(merged)) {
+          cache = local;
+          cacheMtimeMs = localMtimeMs();
+          await kvSet(opts.key, cache);
+        } else if (remoteAt >= localMtimeMs()) {
+          cache = merged;
           writeLocal(cache);
         } else {
-          cache = readLocal();
+          cache = local;
+          cacheMtimeMs = localMtimeMs();
           await kvSet(opts.key, cache);
         }
       } else {
         cache = readLocal();
+        cacheMtimeMs = localMtimeMs();
         await kvSet(opts.key, cache);
       }
       remoteReady = true;
@@ -96,8 +124,10 @@ export function createJsonStore<T>(opts: {
   }
 
   function load(): T {
+    refreshFromDiskIfNewer();
     if (cache) return cache;
     cache = readLocal();
+    cacheMtimeMs = localMtimeMs();
     return cache;
   }
 
@@ -109,13 +139,22 @@ export function createJsonStore<T>(opts: {
     const remote = await blobReadJson(blobPath());
     if (!remote.ok) {
       cache = readLocal();
+      cacheMtimeMs = localMtimeMs();
       throw new Error(`[store] ${opts.key} blob hydrate failed`);
     }
     if (remote.json) {
       try {
-        if (remote.updatedAtMs >= localMtimeMs()) {
-          cache = { ...opts.empty(), ...(JSON.parse(remote.json) as T) };
+        const parsed = { ...opts.empty(), ...(JSON.parse(remote.json) as T) };
+        const local = readLocal();
+        if (remote.updatedAtMs >= localMtimeMs() && contentRank(parsed) >= contentRank(local)) {
+          cache = parsed;
           writeLocal(cache);
+          return;
+        }
+        if (contentRank(local) > contentRank(parsed)) {
+          cache = local;
+          cacheMtimeMs = localMtimeMs();
+          await blobSetJson(blobPath(), JSON.stringify(cache));
           return;
         }
       } catch {
@@ -131,6 +170,7 @@ export function createJsonStore<T>(opts: {
       return;
     }
     cache = readLocal();
+    cacheMtimeMs = localMtimeMs();
     await blobSetJson(blobPath(), JSON.stringify(cache));
   }
 
@@ -155,13 +195,20 @@ export function createJsonStore<T>(opts: {
   }
 
   async function pull() {
+    refreshFromDiskIfNewer();
     if (opts.remote === "blob") {
       if (!remoteReady || !isMongoConfigured()) return;
       const remote = await blobReadJson(blobPath());
       if (!remote.ok || !remote.json) return;
-      if (remote.updatedAtMs <= localMtimeMs() + 250) return;
       try {
-        cache = { ...opts.empty(), ...(JSON.parse(remote.json) as T) };
+        const parsed = { ...opts.empty(), ...(JSON.parse(remote.json) as T) };
+        const local = cache ?? readLocal();
+        if (contentRank(local) > contentRank(parsed)) {
+          await blobSetJson(blobPath(), JSON.stringify(local));
+          return;
+        }
+        if (remote.updatedAtMs <= localMtimeMs() + 250) return;
+        cache = parsed;
         writeLocal(cache);
       } catch {
         /* keep local */
@@ -172,6 +219,11 @@ export function createJsonStore<T>(opts: {
     const remote = await kvGet<T>(opts.key);
     if (!remote.ok || !remote.value) return;
     const remoteAt = Date.parse(remote.updatedAt ?? "") || 0;
+    const local = cache ?? readLocal();
+    if (contentRank(local) > contentRank(remote.value)) {
+      await kvSet(opts.key, local);
+      return;
+    }
     if (remoteAt <= localMtimeMs() + 250) return;
     cache = { ...opts.empty(), ...remote.value };
     writeLocal(cache);

@@ -349,7 +349,7 @@ function estimateChunks(
     ]),
   ];
   if (!strikeKeys.includes(strikeKey(0))) strikeKeys.unshift(strikeKey(0));
-  return countRollingChunks(strikeKeys, ["CALL", "PUT"], from, to);
+  return countRollingChunks(strikeKeys, ["CALL", "PUT"], from, to, 5);
 }
 
 function canSpawnWorker() {
@@ -519,12 +519,14 @@ export async function startBacktestJob(input: {
 }
 
 function waitForJobProgress() {
-  const deadline = Date.now() + 8000;
+  // Only wait long enough to confirm the worker claimed the job. Do not block
+  // the HTTP action until the whole backtest finishes — cached runs can end in
+  // seconds and the UI would never see status=running.
+  const deadline = Date.now() + 1500;
   while (Date.now() < deadline) {
     const job = readJobFile();
     if (job.status !== "running") return;
-    // Live Dhan fetches take minutes — return so the UI can poll.
-    if (job.fetched > 0) return;
+    if (job.pid || job.done > 0 || job.cached > 0 || job.fetched > 0) return;
     sleepSync(50);
   }
 }

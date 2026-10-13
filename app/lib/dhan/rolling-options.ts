@@ -49,14 +49,25 @@ function fnoSegment(instrument: IndexInstrument) {
   return instrument.id === "SENSEX" ? "BSE_FNO" : "NSE_FNO";
 }
 
+function cachePrefix(
+  instrument: IndexInstrument,
+  strikeKey: string,
+  right: string,
+  interval: number,
+) {
+  const series = interval === 60 ? "" : `m${interval}_`;
+  return `${series}${instrument.id}_${strikeKey}_${right}_`;
+}
+
 function cachePath(
   instrument: IndexInstrument,
   strikeKey: string,
   right: string,
   from: string,
   to: string,
+  interval = 60,
 ) {
-  const safe = `${instrument.id}_${strikeKey}_${right}_${from}_${to}`.replace(
+  const safe = `${cachePrefix(instrument, strikeKey, right, interval)}${from}_${to}`.replace(
     /[^a-zA-Z0-9_+-]/g,
     "_",
   );
@@ -108,9 +119,10 @@ async function readCacheWindow(
   right: string,
   fromDate: string,
   toDate: string,
+  interval = 60,
 ): Promise<RollingBar[] | null> {
   const exact = await readCache(
-    cachePath(instrument, strikeKey, right, fromDate, toDate),
+    cachePath(instrument, strikeKey, right, fromDate, toDate, interval),
   );
   if (exact) return exact;
 
@@ -120,7 +132,7 @@ async function readCacheWindow(
   } catch {
     return null;
   }
-  const prefix = `${instrument.id}_${strikeKey}_${right}_`;
+  const prefix = cachePrefix(instrument, strikeKey, right, interval);
   const byTs = new Map<number, RollingBar>();
   for (const name of names) {
     if (!name.startsWith(prefix) || !name.endsWith(".json")) continue;
@@ -185,13 +197,17 @@ function utcDay(date: Date) {
   );
 }
 
+function windowSpanDays(interval: number) {
+  return interval === 5 ? 10 : 30;
+}
+
 /** Count backward from `to` so 3/6/12 month lookbacks share the same cache files. */
-function rollingWindows(from: Date, to: Date) {
+function rollingWindows(from: Date, to: Date, spanDays = 30) {
   const start = utcDay(from);
   let cursor = utcDay(to);
   const windows: Array<{ fromDate: string; toDate: string }> = [];
   while (cursor > start) {
-    const chunkStart = addDays(cursor, -30);
+    const chunkStart = addDays(cursor, -spanDays);
     const fromDate = chunkStart > start ? chunkStart : start;
     windows.unshift({
       fromDate: formatDate(fromDate),
@@ -202,8 +218,8 @@ function rollingWindows(from: Date, to: Date) {
   return windows;
 }
 
-function countSeriesChunks(from: Date, to: Date) {
-  return rollingWindows(from, to).length;
+function countSeriesChunks(from: Date, to: Date, interval = 60) {
+  return rollingWindows(from, to, windowSpanDays(interval)).length;
 }
 
 export function countRollingChunks(
@@ -211,8 +227,9 @@ export function countRollingChunks(
   rights: Array<"CALL" | "PUT">,
   from: Date,
   to: Date,
+  interval = 60,
 ) {
-  return strikeKeys.length * rights.length * countSeriesChunks(from, to);
+  return strikeKeys.length * rights.length * countSeriesChunks(from, to, interval);
 }
 
 async function fetchRollingChunk(
@@ -221,14 +238,16 @@ async function fetchRollingChunk(
   right: "CALL" | "PUT",
   fromDate: string,
   toDate: string,
+  interval = 60,
 ): Promise<{ bars: RollingBar[]; cached: boolean }> {
-  const file = cachePath(instrument, strikeKey, right, fromDate, toDate);
+  const file = cachePath(instrument, strikeKey, right, fromDate, toDate, interval);
   const cached = await readCacheWindow(
     instrument,
     strikeKey,
     right,
     fromDate,
     toDate,
+    interval,
   );
   if (cached) {
     try {
@@ -243,7 +262,7 @@ async function fetchRollingChunk(
     "/v2/charts/rollingoption",
     {
       exchangeSegment: fnoSegment(instrument),
-      interval: 60,
+      interval,
       securityId: String(instrument.securityId),
       instrument: "OPTIDX",
       expiryFlag: "WEEK",
@@ -300,19 +319,22 @@ export async function fetchRollingSeries(
   from: Date,
   to: Date,
   onChunk?: (info: { cached: boolean; label: string }) => void,
+  interval = 60,
 ): Promise<RollingBar[]> {
   const chunks: RollingBar[][] = [];
-  for (const window of rollingWindows(from, to)) {
+  const span = interval === 5 ? "5m " : "";
+  for (const window of rollingWindows(from, to, windowSpanDays(interval))) {
     const { bars, cached } = await fetchRollingChunk(
       instrument,
       strikeKey,
       right,
       window.fromDate,
       window.toDate,
+      interval,
     );
     onChunk?.({
       cached,
-      label: `${instrument.id} ${strikeKey} ${right} ${window.fromDate}→${window.toDate}`,
+      label: `${span}${instrument.id} ${strikeKey} ${right} ${window.fromDate}→${window.toDate}`,
     });
     chunks.push(bars);
   }
@@ -327,8 +349,9 @@ export async function fetchRollingBundle(
   from: Date,
   to: Date,
   onProgress?: (progress: RollingProgress) => void,
+  interval = 60,
 ) {
-  const total = countRollingChunks(strikeKeys, rights, from, to);
+  const total = countRollingChunks(strikeKeys, rights, from, to, interval);
   let done = 0;
   let cached = 0;
   let fetched = 0;
@@ -355,6 +378,7 @@ export async function fetchRollingBundle(
           else fetched += 1;
           onProgress?.({ done, total, cached, fetched, label: info.label });
         },
+        interval,
       );
     }
   }

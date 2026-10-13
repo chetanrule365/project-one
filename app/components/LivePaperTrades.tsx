@@ -1,3 +1,6 @@
+import { WalletStrip } from "./WalletStrip";
+import type { WalletSnapshot } from "../lib/lab/wallet";
+
 type LiveLeg = {
   right: string;
   strike: number;
@@ -96,23 +99,25 @@ export function LivePaperTrades({
   trades,
   totalPnlInr,
   asOf,
+  wallet,
 }: {
   trades: LiveTrade[];
   totalPnlInr: number;
   asOf: string | null;
+  wallet?: WalletSnapshot;
 }) {
   const asOfLabel = formatIstTime(asOf);
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-4 dark:border-slate-800 dark:bg-slate-900/70">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="flex items-center gap-2 text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
             <LiveDot />
             Live paper trades
           </p>
           <p className="mt-0.5 text-xs text-slate-400">
-            Open positions, marked to the latest option prices — simulation only.
+            ₹1 lakh wallet. Margin is locked while a trade is open.
           </p>
         </div>
         {trades.length > 0 ? (
@@ -129,6 +134,11 @@ export function LivePaperTrades({
           </div>
         ) : null}
       </div>
+      {wallet ? (
+        <div className="mb-3 rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-3 dark:border-slate-800 dark:bg-slate-950/40">
+          <WalletStrip wallet={wallet} />
+        </div>
+      ) : null}
 
       {trades.length === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
@@ -165,6 +175,12 @@ export function LivePaperTrades({
                   {formatLegs(trade)}
                   <span className="text-slate-400"> · </span>
                   {formatPremium(trade.credit)}
+                  {trade.margin_inr != null ? (
+                    <>
+                      <span className="text-slate-400"> · </span>
+                      Margin ₹ {formatNumber(trade.margin_inr, 0)}
+                    </>
+                  ) : null}
                 </p>
                 <p className="mt-1 text-xs tabular-nums text-slate-400">
                   Spot {formatNumber(trade.spot_entry, 0)}
@@ -184,6 +200,7 @@ export function LivePaperTrades({
                   <th className="px-3 py-2 text-left">Path</th>
                   <th className="px-3 py-2 text-left">Legs</th>
                   <th className="px-3 py-2 text-right">Premium</th>
+                  <th className="px-3 py-2 text-right">Margin ₹</th>
                   <th className="px-3 py-2 text-right">Spot</th>
                   <th className="px-3 py-2 text-right">Live P&L ₹</th>
                 </tr>
@@ -209,6 +226,11 @@ export function LivePaperTrades({
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       {formatPremium(trade.credit)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {trade.margin_inr == null
+                        ? "—"
+                        : formatNumber(trade.margin_inr, 0)}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       {formatNumber(trade.spot_entry, 0)}

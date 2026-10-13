@@ -1,6 +1,6 @@
 import { createJsonStore } from "../store/json-store";
 import type { Leg } from "../strategies/types";
-import { IC_SPAN_NOTIONAL_FRAC, lotSizeFor } from "../strategies/types";
+import { marginRequiredInr } from "./margin";
 import { isExpiryCalendarDay, normalizeExpiryDay } from "../strategies/expiry-day";
 
 export type PaperRun = {
@@ -46,6 +46,9 @@ export type PaperTrade = {
   mark_spot?: number | null;
   /** ISO timestamp of the last live mark. */
   mark_at?: string | null;
+  /** Sweep ride: exit if spot reclaims this level. */
+  reclaim_spot?: number | null;
+  reclaim_dir?: "below" | "above" | null;
 };
 
 type PaperState = {
@@ -183,10 +186,15 @@ export function listAllPaperTrades() {
   return [...load().trades];
 }
 
-export function getOpenTrade(runId: number) {
+export function listOpenTrades(runId: number) {
   return load()
     .trades.filter((trade) => trade.run_id === runId && trade.status === "open")
-    .sort((a, b) => b.id - a.id)[0];
+    .sort((a, b) => a.id - b.id);
+}
+
+export function getOpenTrade(runId: number) {
+  const open = listOpenTrades(runId);
+  return open[open.length - 1];
 }
 
 export function insertOpenTrade(
@@ -281,21 +289,20 @@ export function listAllTradesWithInstrument(): PaperTradeExportRow[] {
   return state.trades.map((trade) => {
     const run = runsById.get(trade.run_id);
     const instrumentId = run?.instrument_id ?? null;
-    const lot = lotSizeFor(instrumentId ?? "NIFTY");
-    let margin: number | null = null;
-    if (typeof trade.spot_entry === "number" && Number.isFinite(trade.spot_entry)) {
-      margin = trade.spot_entry * lot * IC_SPAN_NOTIONAL_FRAC;
-    } else {
-      const debit = trade.credit < 0;
-      margin = debit ? Math.abs(trade.credit) * lot : Math.max(0, trade.width - trade.credit) * lot;
-    }
     return {
       ...trade,
       instrument_id: instrumentId,
       run_strategy_id: run?.strategy_id ?? null,
       run_status: run?.status ?? null,
       width_steps: run?.width_steps ?? null,
-      margin_inr: margin,
+      margin_inr: marginRequiredInr({
+        instrumentId,
+        strategyId: trade.strategy_id,
+        credit: trade.credit,
+        width: trade.width,
+        spot: trade.spot_entry,
+        legCount: trade.legs?.length,
+      }),
     };
   });
 }

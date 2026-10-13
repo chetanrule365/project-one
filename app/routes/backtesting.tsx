@@ -8,6 +8,7 @@ import {
   DHAN_FNO_BROKERAGE_PER_ORDER,
   strategyNetRows,
   tradeBrokerageInr,
+  tradeMarginInr,
   tradePnlAfterBrokerageInr,
 } from "../lib/lab/backtest";
 import {
@@ -32,9 +33,10 @@ import {
 } from "../lib/lab/backtest-store";
 import {
   autoPlaybookStrategyIds,
-  listStrategies,
+  listBacktestStrategies,
 } from "../lib/strategies/registry";
 import { DEFAULT_WIDTH_STEPS } from "../lib/strategies/types";
+import { WALLET_START_INR } from "../lib/lab/wallet";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -65,7 +67,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const saved = savedId ? getBacktest(savedId) : null;
   return {
     instruments: INDEX_INSTRUMENTS,
-    strategies: listStrategies().map((s) => ({ id: s.id, name: s.name })),
+    strategies: listBacktestStrategies(),
     history: listBacktests(),
     saved,
     job,
@@ -194,6 +196,7 @@ function BacktestResults({ result }: { result: SavedBacktest }) {
         {result.mode === "auto" ? "Auto path" : "Single path"}
         {` · saved ${formatIstStamp(result.savedAt)} IST`}
         {` · Dhan ₹${DHAN_FNO_BROKERAGE_PER_ORDER}/order (buy+sell each leg; GST/STT not included)`}
+        {` · margin 1 lot (SPAN on 4-leg, max loss on 2-leg)`}
       </p>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Trades" value={String(m.trades)} />
@@ -221,6 +224,27 @@ function BacktestResults({ result }: { result: SavedBacktest }) {
         <MetricCard
           label="Profit factor"
           value={formatNumber(m.profitFactor, 2)}
+        />
+        <MetricCard
+          label="Avg margin (₹)"
+          value={formatNumber(m.avgMarginInr ?? 0, 0)}
+        />
+        <MetricCard
+          label="Wallet start (₹)"
+          value={formatNumber(m.walletStartInr ?? WALLET_START_INR, 0)}
+        />
+        <MetricCard
+          label="Wallet end (₹)"
+          value={formatNumber(
+            m.walletEndInr ??
+              WALLET_START_INR +
+                (m.totalPnlAfterBrokerageInr ?? m.totalPnlInr),
+            0,
+          )}
+        />
+        <MetricCard
+          label="Skipped (wallet)"
+          value={String(m.skippedForMargin ?? 0)}
         />
         <MetricCard label="Wins" value={String(m.wins)} />
         <MetricCard label="Losses" value={String(m.losses)} />
@@ -289,6 +313,7 @@ function BacktestResults({ result }: { result: SavedBacktest }) {
               <th className="px-3 py-2 text-left">Hours</th>
               <th className="px-3 py-2 text-left">Exit</th>
               <th className="px-3 py-2 text-right">Credit</th>
+              <th className="px-3 py-2 text-right">Margin ₹</th>
               <th className="px-3 py-2 text-right">P&L pts</th>
               <th className="px-3 py-2 text-right">Gross ₹</th>
               <th className="px-3 py-2 text-right">Brk ₹</th>
@@ -309,13 +334,17 @@ function BacktestResults({ result }: { result: SavedBacktest }) {
                 <td className="px-3 py-2 tabular-nums">{trade.entryDay}</td>
                 <td className="px-3 py-2">{trade.expirySession ? "Yes" : "No"}</td>
                 <td className="px-3 py-2 tabular-nums">
-                  {trade.entryHour}:00→{trade.exitHour}:00
+                  {trade.entryHour}:{String(trade.entryMinute ?? 0).padStart(2, "0")}
+                  →{trade.exitHour}:{String(trade.exitMinute ?? 0).padStart(2, "0")}
                 </td>
                 <td className="px-3 py-2 text-xs text-slate-500">
                   {trade.exitReason ?? "—"}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">
                   {formatNumber(trade.credit)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {formatNumber(tradeMarginInr(trade, result.instrumentId), 0)}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">
                   {formatNumber(trade.pnlPoints)}
@@ -395,9 +424,7 @@ export default function BacktestingPage({
     tickJob ?? loaderData.job,
   );
   const submitting = run.state !== "idle";
-  const running =
-    job.status === "running" ||
-    (submitting && job.status !== "done" && job.status !== "error");
+  const running = submitting || job.status === "running";
   const savedId = loaderData.saved?.id ?? null;
   const revalidateRef = useRef(revalidator.revalidate);
   revalidateRef.current = revalidator.revalidate;
@@ -412,6 +439,11 @@ export default function BacktestingPage({
   const error =
     (run.data && run.data.ok === false ? run.data.error : null) ??
     (job.status === "error" ? job.error : null);
+  const justFinished =
+    !running &&
+    job.status === "done" &&
+    Boolean(job.resultId) &&
+    job.message;
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 px-4 py-8 dark:from-gray-950 dark:via-gray-950 dark:to-gray-900">
@@ -424,10 +456,14 @@ export default function BacktestingPage({
             Backtesting
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
-            Project One: sell credits only — expiry and day-before (Bank Nifty
-            last Tuesday of the month). Quiet iron condors on Nifty/Sensex.
-            Flatten by 14:00. Never buy premium. Results save to MongoDB. No
-            real orders.
+            Project One sells expiry and day-before credits and can hold a
+            trade at the same time as a 5-minute sweep. Fills, stops, and
+            take-profit are marked on 5-minute option candles. Sweep only fades
+            a failed stop-hunt; it does not ride breaks. Bank Nifty only on
+            last-Tuesday week. Project One flats at 14:00 (15:00 on expiry),
+            the sweep at 15:15. Each run starts with a ₹1 lakh wallet; a setup
+            is skipped when its margin does not fit remaining cash.
+            No real orders.
           </p>
         </header>
 
@@ -445,15 +481,17 @@ export default function BacktestingPage({
             {loaderData.cloudWorker
               ? "Runs on Railway. This browser only starts the job and shows progress."
               : "Runs on this server. Set CLOUD_APP_URL to send jobs to Railway instead."}{" "}
-            First 12-month run pulls Dhan hourly bars at 1 request / 3s
-            (~10–15 min). Cached reruns are seconds.
+            First long run pulls 5-minute option candles at ~1 request / 3s.
+            With cache warm, a 12-month Nifty rerun is usually seconds.
           </p>
 
           {running ? (
             <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
               <p className="font-medium">Running — not hung</p>
               <p className="mt-1 text-sky-800 dark:text-sky-200">
-                {submitting ? "Starting…" : job.message || "Fetching history…"}
+                {submitting && job.status !== "running"
+                  ? "Starting worker…"
+                  : job.message || "Fetching history…"}
               </p>
               {job.total > 0 ? (
                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-sky-200 dark:bg-sky-900">
@@ -470,6 +508,25 @@ export default function BacktestingPage({
                 {job.cached || job.fetched
                   ? ` · ${job.cached} cache / ${job.fetched} live`
                   : ""}
+              </p>
+            </div>
+          ) : justFinished ? (
+            <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100">
+              <p className="font-medium">Finished</p>
+              <p className="mt-1">
+                {job.message}
+                {job.resultId ? (
+                  <>
+                    {" "}
+                    ·{" "}
+                    <a
+                      href={`/backtesting?run=${job.resultId}`}
+                      className="font-medium underline-offset-2 hover:underline"
+                    >
+                      Open run #{job.resultId}
+                    </a>
+                  </>
+                ) : null}
               </p>
             </div>
           ) : null}
@@ -537,13 +594,14 @@ export default function BacktestingPage({
             <div className="relative z-10 flex items-end">
               <button
                 type="submit"
-                className="w-full cursor-pointer rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                disabled={running}
+                className="w-full cursor-pointer rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-wait disabled:opacity-70 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
               >
-                {submitting
-                  ? "Starting…"
-                  : job.status === "running"
-                    ? "Run again"
-                    : "Run backtest"}
+                {running
+                  ? submitting && job.status !== "running"
+                    ? "Starting…"
+                    : "Running…"
+                  : "Run backtest"}
               </button>
             </div>
           </run.Form>
@@ -577,6 +635,8 @@ export default function BacktestingPage({
                     <th className="px-3 py-2 text-right">Trades</th>
                     <th className="px-3 py-2 text-right">Win %</th>
                     <th className="px-3 py-2 text-right">Gross ₹</th>
+                    <th className="px-3 py-2 text-right">Avg margin ₹</th>
+                    <th className="px-3 py-2 text-right">Wallet ₹</th>
                     <th className="px-3 py-2 text-right">Net ₹</th>
                   </tr>
                 </thead>
@@ -609,6 +669,12 @@ export default function BacktestingPage({
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">
                         {formatNumber(run.totalPnlInr, 0)}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {formatNumber(run.avgMarginInr ?? 0, 0)}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {formatNumber(run.walletEndInr ?? WALLET_START_INR, 0)}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">
                         {formatNumber(run.totalPnlAfterBrokerageInr, 0)}
