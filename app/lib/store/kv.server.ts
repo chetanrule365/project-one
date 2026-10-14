@@ -1,4 +1,4 @@
-import { isMongoConfigured, mongoCollection } from "../mongo";
+import { isMongoConfigured, mongoCollection } from "../mongo.server";
 
 type KvDoc = {
   _id: string;

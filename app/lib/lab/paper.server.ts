@@ -1,11 +1,16 @@
-import { getIndexByParam, INDEX_INSTRUMENTS } from "../dhan/instruments";
-import { loadOptionChainPage } from "../dhan/option-chain";
-import { fetchIndexQuotes, fetchPriorSessionStats } from "../dhan/quotes";
+import { getIndexByParam } from "../dhan/instruments";
+import { loadOptionChainPage } from "../dhan/option-chain.server";
+import { fetchIndexQuotes, fetchPriorSessionStats } from "../dhan/quotes.server";
 import {
   getStrategy,
   pickPlaybookEntries,
 } from "../strategies/registry";
 import { isProjectOne, PROJECT_ONE_ID } from "../strategies/project-one";
+import { intrinsic } from "../strategies/common";
+import {
+  EXPIRY_TREND_ID,
+  inExpiryTrendWindow,
+} from "../strategies/expiry-trend-credit";
 import {
   buildLiveDayStructure,
   chainAroundAtm,
@@ -13,27 +18,17 @@ import {
   isIstTradingWeekday,
   liveExpirySession,
   nextExpiryDateIst,
+  normalizeExpiryDay,
   oiWalls,
   todayIst,
 } from "../strategies/expiry-day";
 import {
   DEFAULT_WIDTH_STEPS,
-  inMorningEntryWindow,
-  inSweepEntryWindow,
   istClock,
   lotSizeFor,
-  MORNING_PLAYBOOK_WINDOW,
   type OpenPosition,
   type Strategy,
 } from "../strategies/types";
-import { loadTodaySweepBars } from "../dhan/intraday-5m";
-import {
-  detectLiquiditySweep,
-  SWEEP_FADE_ID,
-  sweepBuffer,
-  sweepIsFresh,
-  sweepPositionExtras,
-} from "../strategies/liquidity-sweep";
 import { decidePaperExit } from "./paper-exit";
 import {
   closeTrade,
@@ -48,11 +43,15 @@ import {
   startPaperRun,
   type PaperRun,
   type PaperTrade,
-} from "./paper-store";
+} from "./paper-store.server";
 import {
   exitPremiumsFromChain,
 } from "./paper-position";
-import { marginRequiredInr } from "./margin";
+import {
+  marginConsumedInr,
+  paperTradeBrokerageInr,
+  paperTradeNetPnlInr,
+} from "./paper-shared";
 import {
   canAffordMargin,
   walletFromPaperTrades,
@@ -68,53 +67,15 @@ function minuteIst() {
   return istClock().minute;
 }
 
-/**
- * Capital blocked in ₹ for 1 lot.
- * Buys: premium paid. 4-leg IC: Dhan SPAN (~4.4% of notional).
- * 2-leg credits: defined-risk max loss (width − credit).
- */
-export function marginConsumedInr(trade: {
-  instrument_id?: string;
-  strategy_id: string;
-  credit: number;
-  width: number;
-  spot_entry?: number;
-  legs?: Array<unknown>;
-  legCount?: number;
-}) {
-  return marginRequiredInr({
-    instrumentId: trade.instrument_id,
-    strategyId: trade.strategy_id,
-    credit: trade.credit,
-    width: trade.width,
-    spot: trade.spot_entry,
-    legCount: trade.legCount ?? trade.legs?.length,
-  });
-}
+export {
+  currentMonthIst,
+  entryMonthIst,
+  formatMonthLabel,
+  marginConsumedInr,
+  paperTradeBrokerageInr,
+  paperTradeNetPnlInr,
+} from "./paper-shared";
 
-export function currentMonthIst() {
-  return todayIst().slice(0, 7);
-}
-
-export function entryMonthIst(entryAt: string) {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(entryAt)) return entryAt.slice(0, 7);
-  const date = new Date(entryAt);
-  if (!Number.isFinite(date.getTime())) return entryAt.slice(0, 7);
-  return date
-    .toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
-    .slice(0, 7);
-}
-
-export function formatMonthLabel(month: string) {
-  const date = new Date(`${month}-01T12:00:00+05:30`);
-  if (!Number.isFinite(date.getTime())) return month;
-  return date.toLocaleDateString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    month: "long",
-    year: "numeric",
-  });
-}
- 
 export function getPaperSnapshot() {
   // repairStoredPaperPnls() removed — ensure stored pnls are valid elsewhere
   const activeRuns = listActiveRuns();
@@ -124,12 +85,18 @@ export function getPaperSnapshot() {
   const trades = listAllPaperTrades()
     .map((trade) => {
       const instrumentId = runById.get(trade.run_id)?.instrument_id;
+      const brokerage_inr = paperTradeBrokerageInr(trade);
       return {
         ...trade,
         instrument_id: instrumentId,
         margin_inr: marginConsumedInr({
           ...trade,
           instrument_id: instrumentId,
+        }),
+        brokerage_inr,
+        pnl_after_brokerage_inr: paperTradeNetPnlInr({
+          ...trade,
+          brokerage_inr,
         }),
       };
     })
@@ -173,17 +140,15 @@ export function getLivePaperTrades() {
   return { trades, totalPnlInr, asOf, wallet: snapshot.wallet };
 }
 
-/** Always-on paper: one Project One run per index. No start/stop required. */
+/** Always-on paper: Expiry Trend Credit on Nifty. No start/stop required. */
 export function ensureAlwaysOnPaperRuns() {
   const active = listActiveRuns();
-  for (const instrument of INDEX_INSTRUMENTS) {
-    if (!active.some((run) => run.instrument_id === instrument.id)) {
-      startPaperRun({
-        instrumentId: instrument.id,
-        strategyId: PROJECT_ONE_ID,
-        widthSteps: DEFAULT_WIDTH_STEPS,
-      });
-    }
+  if (!active.some((run) => run.instrument_id === "NIFTY")) {
+    startPaperRun({
+      instrumentId: "NIFTY",
+      strategyId: EXPIRY_TREND_ID,
+      widthSteps: DEFAULT_WIDTH_STEPS,
+    });
   }
 }
 
@@ -193,7 +158,7 @@ export function startPaper(input: {
   widthSteps: number;
 }) {
   const run = startPaperRun(input);
-  void import("./paper-worker").then((m) => m.ensurePaperWorker());
+  void import("./paper-worker.server").then((m) => m.ensurePaperWorker());
   return run;
 }
 
@@ -312,13 +277,18 @@ export async function syncPaper(run?: PaperRun): Promise<{
     const settleStrategy = getStrategy(open.strategy_id) ?? strategies[0];
     const position = positionFromTrade(open);
 
-    const exitPremiums = exitPremiumsFromChain(tradeChain.rows, position.legs, tradeChain.spot);
+    // Dhan falls back to the next expiry once ours is gone; settle at intrinsic instead.
+    const chainIsOurs =
+      !tradeChain.expiry || tradeChain.expiry === normalizeExpiryDay(open.expiry_at);
+    const exitPremiums = chainIsOurs
+      ? exitPremiumsFromChain(tradeChain.rows, position.legs, tradeChain.spot)
+      : {};
     const exitLegs = position.legs.map((leg) => ({
       ...leg,
       premium:
         exitPremiums[`${leg.strikeKey}:${leg.right}`] ??
         exitPremiums[`${leg.strike}:${leg.right}`] ??
-        leg.premium,
+        (chainIsOurs ? leg.premium : intrinsic(leg.right, leg.strike, tradeChain.spot)),
     }));
     const pnlPoints = settleStrategy.settle(position, tradeChain.spot, exitPremiums);
     const decision = decidePaperExit({
@@ -341,6 +311,7 @@ export async function syncPaper(run?: PaperRun): Promise<{
         spotExit: tradeChain.spot,
         pnlPoints: Math.round(decision.pnlPoints),
         pnlInr: Math.round(decision.pnlPoints * lotSizeFor(instrument.id)),
+        brokerageInr: paperTradeBrokerageInr(open),
         exitLegs,
       });
       const closedTrade = listTradesForRun(active.id).find((t) => t.id === open.id);
@@ -356,10 +327,15 @@ export async function syncPaper(run?: PaperRun): Promise<{
 
   const stillOpen = listOpenTrades(active.id);
   const openStrategyIds = new Set(stillOpen.map((trade) => trade.strategy_id));
-  const morningOpen = inMorningEntryWindow(hour);
-  const sweepWindow = inSweepEntryWindow(hour, minute);
-  const wantProjectOne = morningOpen && !openStrategyIds.has(PROJECT_ONE_ID);
-  const wantSweep = sweepWindow && !openStrategyIds.has(SWEEP_FADE_ID);
+  const expiryTrendWindow = inExpiryTrendWindow(hour, minute);
+  const expiryTrendDoneToday = listTradesForRun(active.id).some(
+    (trade) =>
+      trade.strategy_id === EXPIRY_TREND_ID &&
+      new Date(trade.entry_at).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) ===
+        today,
+  );
+  const wantExpiryTrend =
+    expiryTrendWindow && !expiryTrendDoneToday && instrument.id === "NIFTY";
 
   if (!isIstTradingWeekday(today)) {
     return {
@@ -372,18 +348,18 @@ export async function syncPaper(run?: PaperRun): Promise<{
     };
   }
 
-  if (!morningOpen && !sweepWindow) {
+  if (!expiryTrendWindow) {
     return {
       run: active,
       opened: null,
       closed: closedTrades.at(-1) ?? null,
       message: closedTrades.length
-        ? `Closed paper trade. Outside ${MORNING_PLAYBOOK_WINDOW} IST.`
-        : `Outside ${MORNING_PLAYBOOK_WINDOW} IST. Expiry credits only.`,
+        ? "Closed paper trade. Entries only 12:30–12:45 IST on Nifty expiry."
+        : "Entries only 12:30–12:45 IST on Nifty expiry.",
     };
   }
 
-  if (wantProjectOne || wantSweep) {
+  if (wantExpiryTrend) {
     const entryChain = await chainFor(null);
 
     let quote:
@@ -417,23 +393,6 @@ export async function syncPaper(run?: PaperRun): Promise<{
       prior,
     });
 
-    let tape: Awaited<ReturnType<typeof loadTodaySweepBars>> = [];
-    try {
-      tape = await loadTodaySweepBars(instrument);
-    } catch {
-      tape = [];
-    }
-    const sweep = detectLiquiditySweep({
-      bars: tape,
-      priorHigh: structure.priorHigh,
-      priorLow: structure.priorLow,
-      putOi: structure.putOiSupport,
-      callOi: structure.callOiResistance,
-      buffer: sweepBuffer(instrument.id),
-      pick: "latest",
-    });
-    const freshSweep = sweep && sweepIsFresh(sweep, hour, minute) ? sweep : null;
-
     const ctx = {
       instrument,
       spot: entryChain.spot,
@@ -443,17 +402,10 @@ export async function syncPaper(run?: PaperRun): Promise<{
       structure,
       rows: subset,
       expirySession: liveExpirySession(instrument.id, entryChain.expiry),
-      sweep: freshSweep,
     };
 
     for (const picked of pickPlaybookEntries(ctx)) {
-      if (picked.strategy.id === PROJECT_ONE_ID && !wantProjectOne) continue;
-      if (picked.strategy.id === SWEEP_FADE_ID && !wantSweep) continue;
       if (openStrategyIds.has(picked.strategy.id)) continue;
-      const extras =
-        picked.strategy.id === SWEEP_FADE_ID
-          ? sweepPositionExtras(ctx.sweep)
-          : {};
       const marginInr = marginConsumedInr({
         instrument_id: instrument.id,
         strategy_id: picked.strategy.id,
@@ -483,11 +435,11 @@ export async function syncPaper(run?: PaperRun): Promise<{
           width: picked.proposal.width,
           spot_entry: entryChain.spot,
           entry_at: new Date().toISOString(),
-          expiry_at: nextExpiryDateIst(instrument.id, today),
+          expiry_at: entryChain.expiry ?? nextExpiryDateIst(instrument.id, today),
           expiry_session: ctx.expirySession,
           entry_hour: hour,
-          reclaim_spot: extras.reclaimSpot ?? null,
-          reclaim_dir: extras.reclaimDir ?? null,
+          reclaim_spot: null,
+          reclaim_dir: null,
           legs: picked.proposal.legs.map((leg) => ({
             right: leg.right,
             strike: leg.strike,

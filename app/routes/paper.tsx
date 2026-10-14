@@ -1,16 +1,18 @@
 import type { Route } from "./+types/paper";
 import { PaperTradesList } from "../components/PaperTradesList";
 import { WalletStrip } from "../components/WalletStrip";
+import { getPaperSnapshot } from "../lib/lab/paper.server";
 import {
   currentMonthIst,
   entryMonthIst,
   formatMonthLabel,
-  getPaperSnapshot,
-} from "../lib/lab/paper";
+  paperTradeBrokerageInr,
+  paperTradeNetPnlInr,
+} from "../lib/lab/paper-shared";
 import {
   ensurePaperWorker,
-} from "../lib/lab/paper-worker";
-import { pullPaperStore } from "../lib/lab/paper-store";
+} from "../lib/lab/paper-worker.server";
+import { pullPaperStore } from "../lib/lab/paper-store.server";
 import { bootSession } from "../lib/session.server";
 
 export function meta({}: Route.MetaArgs) {
@@ -50,6 +52,19 @@ export async function loader({ request }: Route.LoaderArgs) {
       ? closedTrades
       : closedTrades.filter((trade) => entryMonthIst(trade.entry_at) === month);
 
+  const monthGrossPnl = trades.reduce(
+    (sum, trade) => sum + (trade.pnl_inr ?? 0),
+    0,
+  );
+  const monthBrokerage = trades.reduce(
+    (sum, trade) => sum + paperTradeBrokerageInr(trade),
+    0,
+  );
+  const monthNetPnl = trades.reduce(
+    (sum, trade) => sum + (paperTradeNetPnlInr(trade) ?? 0),
+    0,
+  );
+
   return {
     paper: {
       ...paper,
@@ -57,7 +72,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     },
     months,
     month,
-    monthPnl: trades.reduce((sum, trade) => sum + (trade.pnl_inr ?? 0), 0),
+    monthGrossPnl,
+    monthBrokerage,
+    monthNetPnl,
     monthLabel: month === "all" ? "All-time" : formatMonthLabel(month),
   };
 }
@@ -90,14 +107,22 @@ function monthFilterHtml(month: string, months: string[]) {
   return `<form method="get" action="/paper"><label class="block"><span class="mb-1 block text-[11px] font-medium tracking-wide text-slate-500 uppercase">Month</span><select id="paper-month" name="month" onchange="this.form.submit()" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950">${options}</select></label></form>`;
 }
 
+function pnlTone(value: number) {
+  if (value > 0) return "text-emerald-600 dark:text-emerald-400";
+  if (value < 0) return "text-rose-600 dark:text-rose-400";
+  return "text-slate-700 dark:text-slate-200";
+}
+
 export default function PaperPage({ loaderData }: Route.ComponentProps) {
-  const { paper, months, month, monthPnl, monthLabel } = loaderData;
-  const pnlTone =
-    monthPnl > 0
-      ? "text-emerald-600 dark:text-emerald-400"
-      : monthPnl < 0
-        ? "text-rose-600 dark:text-rose-400"
-        : "text-slate-700 dark:text-slate-200";
+  const {
+    paper,
+    months,
+    month,
+    monthGrossPnl,
+    monthBrokerage,
+    monthNetPnl,
+    monthLabel,
+  } = loaderData;
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-100 px-3 py-4 sm:px-4 sm:py-8 dark:from-gray-950 dark:via-gray-950 dark:to-gray-900">
@@ -120,13 +145,38 @@ export default function PaperPage({ loaderData }: Route.ComponentProps) {
 
         <section className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-4 dark:border-slate-800 dark:bg-slate-900/70">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
-                {monthLabel} P&L
-              </p>
-              <p className={`mt-1 text-2xl font-semibold tabular-nums ${pnlTone}`}>
-                {formatPnl(monthPnl)}
-              </p>
+            <div className="flex flex-wrap items-end gap-6">
+              <div>
+                <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
+                  {monthLabel} Gross
+                </p>
+                <p
+                  className={`mt-1 text-2xl font-semibold tabular-nums ${pnlTone(monthGrossPnl)}`}
+                >
+                  {formatPnl(monthGrossPnl)}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
+                  Brokerage
+                </p>
+                <p className="mt-1 text-2xl font-semibold tabular-nums text-slate-900 dark:text-white">
+                  ₹{" "}
+                  {monthBrokerage.toLocaleString("en-IN", {
+                    maximumFractionDigits: 0,
+                  })}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
+                  {monthLabel} Net
+                </p>
+                <p
+                  className={`mt-1 text-2xl font-semibold tabular-nums ${pnlTone(monthNetPnl)}`}
+                >
+                  {formatPnl(monthNetPnl)}
+                </p>
+              </div>
             </div>
             <div
               className="sm:w-56"

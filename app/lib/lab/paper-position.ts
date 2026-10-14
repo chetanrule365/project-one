@@ -1,8 +1,8 @@
-import type { OptionChainRow } from "../dhan/option-chain";
+import type { OptionChainRow } from "../dhan/option-chain-types";
 import { intrinsic, longPremium, settleLegs, shortPremium } from "../strategies/common";
 import type { Leg, OpenPosition, OptionRight } from "../strategies/types";
 import { positionDefaults } from "../strategies/registry";
-import type { PaperTrade } from "./paper-store";
+import type { PaperTrade } from "./paper-store.server";
 
 function asRight(value: string | undefined, fallback: OptionRight): OptionRight {
   return value === "PE" || value === "CE" ? value : fallback;

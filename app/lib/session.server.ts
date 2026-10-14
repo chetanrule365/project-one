@@ -1,6 +1,6 @@
 import { redirect } from "react-router";
-import { hasPin, hydratePinFromRequest } from "./dhan/pin";
-import { bootCloudStores } from "./store/boot";
+import { hasPin, hydratePinFromRequest } from "./dhan/pin.server";
+import { bootCloudStores } from "./store/boot.server";
 import { safeNextPath } from "./next-path";
 
 export async function bootSession(

@@ -5,8 +5,8 @@ import {
   OptionChainTable,
 } from "../components/OptionChainTable";
 import { INDEX_INSTRUMENTS, getIndexByParam } from "../lib/dhan/instruments";
-import { loadOptionChainPage } from "../lib/dhan/option-chain";
-import { DhanApiError, DhanConfigError } from "../lib/dhan/quotes";
+import { loadOptionChainPage } from "../lib/dhan/option-chain.server";
+import { DhanApiError, DhanConfigError } from "../lib/dhan/quotes.server";
 import { bootSession } from "../lib/session.server";
 
 export function meta({ data }: Route.MetaArgs) {

@@ -1,10 +1,10 @@
 import type { IndexInstrument } from "../dhan/instruments";
-import { loadSweepBars } from "../dhan/intraday-5m";
+import { loadSweepBars } from "../dhan/intraday-5m.server";
 import {
   fetchRollingBundle,
   type RollingBar,
   type RollingProgress,
-} from "../dhan/rolling-options";
+} from "../dhan/rolling-options.server";
 import {
   detectLiquiditySweep,
   SWEEP_FADE_ID,
@@ -15,10 +15,16 @@ import {
 import {
   autoPlaybookStrategyIds,
   getStrategy,
+  pickPlaybookEntries,
   positionDefaults,
 } from "../strategies/registry";
 import { isProjectOne, projectOneStrategy } from "../strategies/project-one";
 import { isPmSrReversal } from "../strategies/pm-sr-reversal";
+import {
+  EXPIRY_TREND_END_MIN,
+  EXPIRY_TREND_ID,
+  EXPIRY_TREND_START_MIN,
+} from "../strategies/expiry-trend-credit";
 import {
   atmBandKeys,
   buildDayStructure,
@@ -26,6 +32,7 @@ import {
   istParts,
   maxPainFromSnapshot,
   oiWallsFromSnapshot,
+  orbBreakBufferPts,
 } from "../strategies/expiry-day";
 import { strikeKey } from "../strategies/common";
 import {
@@ -33,220 +40,22 @@ import {
   roundTripBrokerageInr,
 } from "../strategies/cost-filter";
 import { marginRequiredInr } from "./margin";
-import { SimWallet, WALLET_START_INR } from "./wallet";
+import { SimWallet } from "./wallet";
 import {
+  computeMetrics,
+  type BacktestResult,
+  type BacktestTrade,
+} from "./backtest-shared";
+import {
+  DEFAULT_ORB_WINDOW,
   DEFAULT_WIDTH_STEPS,
   inSweepEntryWindow,
   lotSizeFor,
+  type OrbWindow,
   type OpenPosition,
   type Strategy,
   type TradeProposal,
 } from "../strategies/types";
-
-export { DHAN_FNO_BROKERAGE_PER_ORDER } from "../strategies/cost-filter";
-
-export type BacktestTrade = {
-  strategyId: string;
-  strategyName: string;
-  entryDay: string;
-  expiryDay: string;
-  entryHour: number;
-  entryMinute?: number;
-  exitHour: number;
-  exitMinute?: number;
-  shortStrike: number;
-  longStrike: number;
-  shortSide: string;
-  longSide: string;
-  credit: number;
-  width: number;
-  spotEntry: number;
-  spotExpiry: number;
-  pnlPoints: number;
-  pnlInr: number;
-  won: boolean;
-  pickReason?: string;
-  exitReason?: string;
-  expirySession: boolean;
-  legCount?: number;
-  brokerageInr?: number;
-  pnlAfterBrokerageInr?: number;
-  marginInr?: number;
-};
-
-export type BacktestMetrics = {
-  trades: number;
-  wins: number;
-  losses: number;
-  winRate: number;
-  totalPnlPoints: number;
-  totalPnlInr: number;
-  avgPnlPoints: number;
-  maxDrawdownInr: number;
-  profitFactor: number;
-  brokerageInr: number;
-  totalPnlAfterBrokerageInr: number;
-  avgMarginInr: number;
-  walletStartInr: number;
-  walletEndInr: number;
-  skippedForMargin: number;
-  peakLockedInr: number;
-  byStrategy: StrategyNetRow[];
-};
-
-export type StrategyNetRow = {
-  strategyId: string;
-  strategyName: string;
-  trades: number;
-  wins: number;
-  winRate: number;
-  avgPnlPoints: number;
-  totalPnlInr: number;
-  brokerageInr: number;
-  totalPnlAfterBrokerageInr: number;
-};
-
-export function inferLegCount(
-  trade: Pick<BacktestTrade, "legCount" | "shortStrike" | "longStrike" | "strategyId">,
-) {
-  if (trade.legCount && trade.legCount > 0) return trade.legCount;
-  if (trade.strategyId === "IRON_CONDOR") return 4;
-  const short = trade.shortStrike > 0;
-  const long = trade.longStrike > 0;
-  if (short && long && trade.shortStrike !== trade.longStrike) return 2;
-  return short || long ? 1 : 2;
-}
-
-export function tradeBrokerageInr(trade: BacktestTrade) {
-  if (trade.brokerageInr != null && Number.isFinite(trade.brokerageInr)) {
-    return trade.brokerageInr;
-  }
-  return roundTripBrokerageInr(inferLegCount(trade));
-}
-
-export function tradeMarginInr(trade: BacktestTrade, instrumentId = "NIFTY") {
-  if (trade.marginInr != null && Number.isFinite(trade.marginInr)) {
-    return trade.marginInr;
-  }
-  return marginRequiredInr({
-    instrumentId,
-    strategyId: trade.strategyId,
-    credit: trade.credit,
-    width: trade.width,
-    spot: trade.spotEntry,
-    legCount: inferLegCount(trade),
-  });
-}
-
-export function tradePnlAfterBrokerageInr(trade: BacktestTrade) {
-  if (
-    trade.pnlAfterBrokerageInr != null &&
-    Number.isFinite(trade.pnlAfterBrokerageInr)
-  ) {
-    return trade.pnlAfterBrokerageInr;
-  }
-  return trade.pnlInr - tradeBrokerageInr(trade);
-}
-
-export type BacktestResult = {
-  instrumentId: string;
-  strategyIds: string[];
-  widthSteps: number;
-  from: string;
-  to: string;
-  lotSize: number;
-  mode: "single" | "auto";
-  metrics: BacktestMetrics;
-  trades: BacktestTrade[];
-};
-
-export function computeMetrics(
-  trades: BacktestTrade[],
-  instrumentId?: string,
-  extras?: { skippedForMargin?: number; peakLockedInr?: number },
-): BacktestMetrics {
-  const wins = trades.filter((t) => tradePnlAfterBrokerageInr(t) > 0).length;
-  const losses = trades.length - wins;
-  const totalPnlPoints = trades.reduce((s, t) => s + t.pnlPoints, 0);
-  const totalPnlInr = trades.reduce((s, t) => s + t.pnlInr, 0);
-  const brokerageInr = trades.reduce((s, t) => s + tradeBrokerageInr(t), 0);
-  const nets = trades.map((t) => tradePnlAfterBrokerageInr(t));
-  const grossProfit = nets.filter((n) => n > 0).reduce((s, n) => s + n, 0);
-  const grossLoss = Math.abs(nets.filter((n) => n < 0).reduce((s, n) => s + n, 0));
-  const totalPnlAfterBrokerageInr = totalPnlInr - brokerageInr;
-
-  let equity = WALLET_START_INR;
-  let peak = WALLET_START_INR;
-  let maxDrawdownInr = 0;
-  for (const net of nets) {
-    equity += net;
-    peak = Math.max(peak, equity);
-    maxDrawdownInr = Math.max(maxDrawdownInr, peak - equity);
-  }
-
-  return {
-    trades: trades.length,
-    wins,
-    losses,
-    winRate: trades.length ? (wins / trades.length) * 100 : 0,
-    totalPnlPoints,
-    totalPnlInr,
-    avgPnlPoints: trades.length ? totalPnlPoints / trades.length : 0,
-    maxDrawdownInr,
-    profitFactor:
-      grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0,
-    brokerageInr,
-    totalPnlAfterBrokerageInr,
-    avgMarginInr: trades.length
-      ? trades.reduce((s, t) => s + tradeMarginInr(t, instrumentId), 0) /
-        trades.length
-      : 0,
-    walletStartInr: WALLET_START_INR,
-    walletEndInr: WALLET_START_INR + totalPnlAfterBrokerageInr,
-    skippedForMargin: extras?.skippedForMargin ?? 0,
-    peakLockedInr: extras?.peakLockedInr ?? 0,
-    byStrategy: strategyNetRows(trades),
-  };
-}
-
-export function strategyNetRows(trades: BacktestTrade[]): StrategyNetRow[] {
-  const byId = new Map<string, BacktestTrade[]>();
-  for (const trade of trades) {
-    const rows = byId.get(trade.strategyId) ?? [];
-    rows.push(trade);
-    byId.set(trade.strategyId, rows);
-  }
-  return [...byId.entries()].map(([strategyId, rows]) => {
-    const metrics = computeMetricsWithoutBreakdown(rows);
-    return {
-      strategyId,
-      strategyName: rows[0]?.strategyName ?? strategyId,
-      trades: metrics.trades,
-      wins: metrics.wins,
-      winRate: metrics.winRate,
-      avgPnlPoints: metrics.avgPnlPoints,
-      totalPnlInr: metrics.totalPnlInr,
-      brokerageInr: metrics.brokerageInr,
-      totalPnlAfterBrokerageInr: metrics.totalPnlAfterBrokerageInr,
-    };
-  });
-}
-
-function computeMetricsWithoutBreakdown(trades: BacktestTrade[]) {
-  const wins = trades.filter((t) => tradePnlAfterBrokerageInr(t) > 0).length;
-  const totalPnlPoints = trades.reduce((s, t) => s + t.pnlPoints, 0);
-  const totalPnlInr = trades.reduce((s, t) => s + t.pnlInr, 0);
-  const brokerageInr = trades.reduce((s, t) => s + tradeBrokerageInr(t), 0);
-  return {
-    trades: trades.length,
-    wins,
-    winRate: trades.length ? (wins / trades.length) * 100 : 0,
-    avgPnlPoints: trades.length ? totalPnlPoints / trades.length : 0,
-    totalPnlInr,
-    brokerageInr,
-    totalPnlAfterBrokerageInr: totalPnlInr - brokerageInr,
-  };
-}
 
 type HourBar = { hour: number; bar: RollingBar };
 type ClockBar = { hour: number; minute: number; bar: RollingBar };
@@ -296,6 +105,70 @@ function hourlyBars(bars: ClockBar[]): HourBar[] {
     .map(([hour, bar]) => ({ hour, bar }));
 }
 
+/** Decision clocks for the morning loop (IST). */
+function morningDecisionSlots(
+  dayClock: ClockBar[],
+  opts: {
+    wantOrb: boolean;
+    pmOnly: boolean;
+    orbWindow: OrbWindow;
+    wantExpiryTrend: boolean;
+  },
+): Array<{ hour: number; minute: number }> {
+  if (opts.pmOnly) return [{ hour: 14, minute: 0 }];
+  // Project One decides on the 10:00 and 11:00 prints.
+  const mins = new Set<number>([10 * 60, 11 * 60]);
+  for (const row of dayClock) {
+    const t = clockMinutes(row.hour, row.minute);
+    // ORB breaks rarely land on an hour print — walk every 5m bar in the window.
+    if (opts.wantOrb && t >= opts.orbWindow.startMin && t < opts.orbWindow.endMin) {
+      mins.add(t);
+    }
+    if (
+      opts.wantExpiryTrend &&
+      t >= EXPIRY_TREND_START_MIN &&
+      t < EXPIRY_TREND_END_MIN
+    ) {
+      mins.add(t);
+    }
+  }
+  return [...mins]
+    .sort((a, b) => a - b)
+    .map((t) => ({ hour: Math.floor(t / 60), minute: t % 60 }));
+}
+
+/** Align ORB flags with live: one-sided break vs open + buffer, skip two-sided chop. */
+function applyBacktestOrbFlags(
+  structure: ReturnType<typeof buildDayStructure>,
+  open: number,
+  knownClock: ClockBar[],
+  spot: number,
+  instrumentId: string,
+) {
+  const buf = orbBreakBufferPts(instrumentId, spot || open);
+  let sessionHigh = open;
+  let sessionLow = open;
+  for (const { bar } of knownClock) {
+    const px = bar.spot || bar.close;
+    if (!px) continue;
+    sessionHigh = Math.max(sessionHigh, px);
+    sessionLow = Math.min(sessionLow, px);
+  }
+  const chop =
+    sessionHigh >= open + buf * 0.6 && sessionLow <= open - buf * 0.6;
+  let orbBrokenUp = !chop && spot >= open + buf;
+  let orbBrokenDown = !chop && spot <= open - buf;
+  if (orbBrokenUp && orbBrokenDown) {
+    orbBrokenUp = false;
+    orbBrokenDown = false;
+  }
+  structure.orbBrokenUp = orbBrokenUp;
+  structure.orbBrokenDown = orbBrokenDown;
+  structure.sessionHigh = sessionHigh;
+  structure.sessionLow = sessionLow;
+  return structure;
+}
+
 function hoursOnIndexed(indexed: IndexedSeries, key: string, day: string) {
   return indexed[key]?.get(day) ?? [];
 }
@@ -330,6 +203,8 @@ function snapshotAt(
         .find((row) => clockMinutes(row.hour, row.minute) <= target)?.bar;
       if (!bar) continue;
       premiums[key] = bar.close;
+      // ATM-relative keys roll with spot; held legs must mark at their own strike.
+      if (bar.strike > 0) premiums[`${bar.strike}:${right}`] = bar.close;
       strikes[sk] = bar.strike;
       if (bar.spot) spot = bar.spot;
       const bucket = oiByKey[sk] ?? { ce: 0, pe: 0 };
@@ -340,6 +215,39 @@ function snapshotAt(
   }
 
   return { premiums, strikes, oiByKey, spot };
+}
+
+/**
+ * Marks keyed by absolute strike for each held leg. A leg that has drifted outside the
+ * cached ATM band is extrapolated from the two nearest cached strikes, floored at intrinsic.
+ */
+function strikeMarks(
+  premiums: Record<string, number>,
+  legs: OpenPosition["legs"],
+  spot: number,
+) {
+  const marks: Record<string, number> = {};
+  for (const leg of legs) {
+    const key = `${leg.strike}:${leg.right}`;
+    if (premiums[key] !== undefined) {
+      marks[key] = premiums[key];
+      continue;
+    }
+    const known = Object.entries(premiums)
+      .filter(([k]) => /^\d/.test(k) && k.endsWith(`:${leg.right}`))
+      .map(([k, px]) => ({ strike: Number(k.split(":")[0]), px }))
+      .sort((a, b) => Math.abs(a.strike - leg.strike) - Math.abs(b.strike - leg.strike));
+    const intrinsicPx =
+      leg.right === "CE" ? Math.max(0, spot - leg.strike) : Math.max(0, leg.strike - spot);
+    const [a, b] = known;
+    if (!a || !b || a.strike === b.strike) {
+      marks[key] = intrinsicPx;
+      continue;
+    }
+    const slope = (a.px - b.px) / (a.strike - b.strike);
+    marks[key] = Math.max(intrinsicPx, 0.05, a.px + slope * (leg.strike - a.strike));
+  }
+  return marks;
 }
 
 function priorDayStats(
@@ -419,7 +327,11 @@ function manageIntraday(input: {
   for (const { hour, minute, bar } of manageBars) {
     const snap = snapshotAt(indexed, day, hour, minute, strikeKeys);
     const spot = snap.spot || bar.spot || bar.close;
-    const pnl = strategy.settle(position, spot, snap.premiums);
+    const pnl = strategy.settle(
+      position,
+      spot,
+      strikeMarks(snap.premiums, position.legs, spot),
+    );
     const flatHour = position.flatByHour;
     const flatMinute = position.flatByMinute ?? 0;
 
@@ -539,7 +451,11 @@ function manageIntraday(input: {
     : { premiums: {}, spot: 0 };
   const spot = snap.spot || last?.bar.spot || 0;
   return {
-    pnlPoints: strategy.settle(position, spot, snap.premiums),
+    pnlPoints: strategy.settle(
+      position,
+      spot,
+      strikeMarks(snap.premiums, position.legs, spot),
+    ),
     exitHour: last?.hour ?? entryHour,
     exitMinute: last?.minute ?? entryMinute,
     spotExit: spot,
@@ -563,6 +479,7 @@ async function runTradeDays(
   mode: "single" | "auto",
   onProgress?: (progress: RollingProgress) => void,
   sweepBars: SweepBar[] = [],
+  orbWindow: OrbWindow = DEFAULT_ORB_WINDOW,
 ): Promise<{
   trades: BacktestTrade[];
   skippedForMargin: number;
@@ -584,11 +501,16 @@ async function runTradeDays(
   });
 
   const primary = strategies[0];
-  const projectOne =
-    Boolean(primary && isProjectOne(primary.id)) || mode === "auto";
+  const projectOneOnly =
+    mode === "single" && Boolean(primary && isProjectOne(primary.id));
   const pmOnly =
     mode === "single" && Boolean(primary && isPmSrReversal(primary.id));
-  // Sweep only when Auto picks both, or Sweep is explicitly selected.
+  const wantOrb =
+    mode === "auto" || strategies.some((strategy) => strategy.id === "ORB_ATM");
+  const wantExpiryTrend =
+    mode === "auto" ||
+    strategies.some((strategy) => strategy.id === EXPIRY_TREND_ID);
+  // Sweep only when Auto/Both, or Sweep is explicitly selected.
   const includeSweep =
     mode === "auto" || strategies.some((strategy) => strategy.id === SWEEP_FADE_ID);
 
@@ -616,27 +538,37 @@ async function runTradeDays(
     const openBar = dayClock[0] ?? dayHours[0];
     const open = openBar.bar.spot || openBar.bar.close;
 
-    const slots = pmOnly ? [14] : [10, 11];
+    const slots = morningDecisionSlots(dayClock, {
+      wantOrb,
+      pmOnly,
+      orbWindow,
+      wantExpiryTrend,
+    });
     const fills: DayFill[] = [];
 
-    let busyUntil = -1;
-    for (const slotHour of slots) {
-      const decisionHour =
-        dayHours.find((h) => h.hour === slotHour)?.hour ??
-        (slotHour === 10
-          ? dayHours.find((h) => h.hour >= 10)?.hour
-          : dayHours.find((h) => h.hour >= 14)?.hour);
-      if (decisionHour === undefined) continue;
-      if (slotHour === 14 && decisionHour < 14) continue;
-      if (decisionHour < busyUntil) continue;
+    let busyUntilMin = -1;
+    let expiryTrendTaken = false;
+    for (const slot of slots) {
+      const decisionHour = slot.hour;
+      const decisionMinute = slot.minute;
+      const decisionMin = clockMinutes(decisionHour, decisionMinute);
+      if (decisionMin < busyUntilMin) continue;
 
-      const snap = snapshotAt(indexed, day, decisionHour, 0, strikeKeys);
+      const snap = snapshotAt(
+        indexed,
+        day,
+        decisionHour,
+        decisionMinute,
+        strikeKeys,
+      );
       if (!snap.spot) continue;
 
       const maxPain = maxPainFromSnapshot(snap.strikes, snap.oiByKey);
       const walls = oiWallsFromSnapshot(snap.strikes, snap.oiByKey);
       const knownClock = dayClock.filter(
-        (row) => clockMinutes(row.hour, row.minute) <= clockMinutes(decisionHour, 0),
+        (row) =>
+          clockMinutes(row.hour, row.minute) <=
+          clockMinutes(decisionHour, decisionMinute),
       );
       const knownHours = hourlyBars(knownClock);
       const structure = buildDayStructure({
@@ -652,31 +584,40 @@ async function runTradeDays(
         callOiResistance: walls.callResist,
       });
 
-      let sessionHigh = open;
-      let sessionLow = open;
-      for (const { bar } of knownClock) {
-        const px = bar.spot || bar.close;
-        if (!px) continue;
-        sessionHigh = Math.max(sessionHigh, px);
-        sessionLow = Math.min(sessionLow, px);
-      }
-      if (decisionHour >= 14) {
+      if (pmOnly) {
+        let sessionHigh = open;
+        let sessionLow = open;
+        for (const { bar } of knownClock) {
+          const px = bar.spot || bar.close;
+          if (!px) continue;
+          sessionHigh = Math.max(sessionHigh, px);
+          sessionLow = Math.min(sessionLow, px);
+        }
         structure.morningHigh = sessionHigh;
         structure.morningLow = sessionLow;
+        structure.sessionHigh = sessionHigh;
+        structure.sessionLow = sessionLow;
+      } else {
+        applyBacktestOrbFlags(
+          structure,
+          open,
+          knownClock,
+          snap.spot,
+          instrument.id,
+        );
       }
-      structure.sessionHigh = sessionHigh;
-      structure.sessionLow = sessionLow;
 
       const ctx = {
         instrument,
         spot: snap.spot,
         widthSteps,
         hour: decisionHour,
-        minute: decisionHour >= 14 ? 0 : undefined,
+        minute: decisionMinute,
         structure,
         premiums: snap.premiums,
         strikes: snap.strikes,
         expirySession: isExpirySession(instrument.id, day, days),
+        orbWindow,
       };
 
       let picked: {
@@ -685,7 +626,19 @@ async function runTradeDays(
         reason: string;
       } | null = null;
 
-      if (mode === "auto" || projectOne) {
+      if (mode === "auto") {
+        // Same morning split as live playbook: quiet → Project One, ORB break → ORB ATM.
+        // Sweep has its own entry path below.
+        const morning = pickPlaybookEntries(ctx).find(
+          (p) => p.strategy.id !== SWEEP_FADE_ID,
+        );
+        if (morning) {
+          const costOk =
+            isProjectOne(morning.strategy.id) ||
+            proposalCoversCosts(morning.proposal, instrument.id).ok;
+          if (costOk) picked = morning;
+        }
+      } else if (projectOneOnly) {
         if (projectOneStrategy.isEligible(ctx)) {
           const proposal = projectOneStrategy.proposeEntry(ctx);
           if (proposal) {
@@ -704,19 +657,38 @@ async function runTradeDays(
             picked = {
               strategy,
               proposal,
-              reason: "Single strategy mode",
+              reason: proposal.description || "Single strategy mode",
             };
           }
         }
       }
 
       if (!picked) continue;
+      // Live paper takes Expiry Trend at most once per session.
+      if (picked.strategy.id === EXPIRY_TREND_ID) {
+        if (expiryTrendTaken) continue;
+        expiryTrendTaken = true;
+      }
 
-      const defaults = positionDefaults(
-        picked.strategy.id,
-        ctx.expirySession,
-        { credit: picked.proposal.netCredit, hour: decisionHour },
-      );
+      const defaults = {
+        ...positionDefaults(picked.strategy.id, ctx.expirySession, {
+          credit: picked.proposal.netCredit,
+          hour: decisionHour,
+        }),
+      };
+      if (picked.strategy.id === "ORB_ATM") {
+        defaults.flatByHour = Math.floor(orbWindow.flatMin / 60);
+        defaults.flatByMinute = orbWindow.flatMin % 60;
+        if (orbWindow.side === "sell") {
+          defaults.stopMult = orbWindow.stopMult ?? 1;
+          defaults.takeProfitFrac = orbWindow.takeProfitFrac ?? 0.5;
+        } else {
+          if (orbWindow.stopMult !== undefined) defaults.stopMult = orbWindow.stopMult;
+          if (orbWindow.takeProfitFrac !== undefined) {
+            defaults.takeProfitFrac = orbWindow.takeProfitFrac;
+          }
+        }
+      }
 
       const position: OpenPosition = {
         strategyId: picked.strategy.id,
@@ -735,7 +707,7 @@ async function runTradeDays(
         position,
         day,
         entryHour: decisionHour,
-        entryMinute: 0,
+        entryMinute: decisionMinute,
         indexed,
         strikeKeys,
       });
@@ -753,7 +725,7 @@ async function runTradeDays(
       });
       const exitMinute = managed.exitMinute ?? 0;
       fills.push({
-        entryMin: clockMinutes(decisionHour, 0),
+        entryMin: decisionMin,
         exitMin: clockMinutes(managed.exitHour, exitMinute),
         marginInr,
         pnlAfterBrokerageInr: pnlInr - brokerageInr,
@@ -763,7 +735,7 @@ async function runTradeDays(
           entryDay: day,
           expiryDay: day,
           entryHour: decisionHour,
-          entryMinute: 0,
+          entryMinute: decisionMinute,
           exitHour: managed.exitHour,
           exitMinute,
           shortStrike: picked.proposal.primaryShortStrike,
@@ -786,7 +758,7 @@ async function runTradeDays(
           marginInr,
         },
       });
-      busyUntil = managed.exitHour;
+      busyUntilMin = clockMinutes(managed.exitHour, exitMinute);
     }
 
     if (!pmOnly && includeSweep) {
@@ -960,6 +932,7 @@ export async function runBacktest(input: {
   strategyIds: string[];
   widthSteps?: number;
   months?: number;
+  orbWindow?: OrbWindow;
   onProgress?: (progress: RollingProgress) => void;
 }): Promise<BacktestResult> {
   const widthSteps = Math.max(
@@ -1029,6 +1002,7 @@ export async function runBacktest(input: {
     mode,
     input.onProgress,
     sweepBars,
+    input.orbWindow,
   );
 
   return {

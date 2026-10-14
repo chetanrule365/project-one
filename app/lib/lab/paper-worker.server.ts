@@ -1,12 +1,12 @@
-import { bootCloudStores } from "../store/boot";
+import { bootCloudStores } from "../store/boot.server";
 import { isCloudBacktestClient, keepCloudAwake } from "./backtest-cloud";
-import { ensureAlwaysOnPaperRuns, syncPaper } from "./paper";
+import { ensureAlwaysOnPaperRuns, syncPaper } from "./paper.server";
 import {
   getOpenTrade,
   listActiveRuns,
   pullPaperStore,
   type PaperRun,
-} from "./paper-store";
+} from "./paper-store.server";
 import { SESSION_MANAGE_UNTIL_HOUR, istClock } from "../strategies/types";
 import { istWeekday, todayIst } from "../strategies/expiry-day";
 
@@ -134,7 +134,7 @@ export function ensurePaperWorker() {
   s.started = true;
   ensureAlwaysOnPaperRuns();
   console.log(
-    "[paper-worker] started — always-on paper sync for all indices",
+    "[paper-worker] started — Expiry Trend Credit on Nifty",
   );
   setTimeout(() => {
     void tick()

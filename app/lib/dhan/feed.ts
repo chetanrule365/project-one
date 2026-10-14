@@ -6,7 +6,7 @@ import {
   parsePrevClosePacket,
   parseQuotePacket,
 } from "./binary";
-import { isDhanSandbox, resolveDhanCredentials } from "./config";
+import { isDhanSandbox, resolveDhanCredentials } from "./config.server";
 import {
   INDEX_INSTRUMENTS,
   SECURITY_ID_TO_INDEX,
@@ -14,7 +14,7 @@ import {
   type FeedStatus,
   type IndexQuote,
 } from "./instruments";
-import { fetchIndexQuotes } from "./quotes";
+import { fetchIndexQuotes } from "./quotes.server";
 
 export type { FeedStatus };
 

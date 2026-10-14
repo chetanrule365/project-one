@@ -1,5 +1,5 @@
-import { createJsonStore } from "../store/json-store";
-import { computeMetrics, type BacktestResult } from "./backtest";
+import { createJsonStore } from "../store/json-store.server";
+import { computeMetrics, type BacktestResult } from "./backtest-shared";
 
 export type SavedBacktest = BacktestResult & {
   id: number;

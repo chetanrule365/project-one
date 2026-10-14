@@ -1,23 +1,13 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getCacheDir } from "../data-dir";
-import { blobGetJson, blobSetJson } from "../store/blob";
-import { isMongoConfigured } from "../mongo";
-import { DhanApiError, dhanRateLimitedPost } from "./config";
+import { blobGetJson, blobSetJson } from "../store/blob.server";
+import { isMongoConfigured } from "../mongo.server";
+import { DhanApiError, dhanRateLimitedPost } from "./config.server";
 import type { IndexInstrument } from "./instruments";
+import type { RollingBar } from "./rolling-bar";
 
-export type RollingBar = {
-  timestamp: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  spot: number;
-  strike: number;
-  iv: number;
-  oi: number;
-  volume: number;
-};
+export type { RollingBar } from "./rolling-bar";
 
 export type RollingSeriesKey = {
   strikeKey: string;
@@ -258,49 +248,73 @@ async function fetchRollingChunk(
     return { bars: cached, cached: true };
   }
 
-  const { status, payload } = await dhanRateLimitedPost<RollingPayload>(
-    "/v2/charts/rollingoption",
-    {
-      exchangeSegment: fnoSegment(instrument),
-      interval,
-      securityId: String(instrument.securityId),
-      instrument: "OPTIDX",
-      expiryFlag: "WEEK",
-      expiryCode: 1,
-      strike: strikeKey,
-      drvOptionType: right,
-      requiredData: [
-        "open",
-        "high",
-        "low",
-        "close",
-        "volume",
-        "iv",
-        "oi",
-        "spot",
-        "strike",
-      ],
-      fromDate,
-      toDate,
-    },
-    "rollingoption",
-  );
+  const maxAttempts = 5;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const { status, payload } = await dhanRateLimitedPost<RollingPayload>(
+        "/v2/charts/rollingoption",
+        {
+          exchangeSegment: fnoSegment(instrument),
+          interval,
+          securityId: String(instrument.securityId),
+          instrument: "OPTIDX",
+          expiryFlag: "WEEK",
+          expiryCode: 1,
+          strike: strikeKey,
+          drvOptionType: right,
+          requiredData: [
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "iv",
+            "oi",
+            "spot",
+            "strike",
+          ],
+          fromDate,
+          toDate,
+        },
+        "rollingoption",
+      );
 
-  if (status >= 400 || payload.status === "failed") {
-    throw new DhanApiError(
-      payload.errorMessage ||
-        payload.message ||
-        payload.remarks ||
-        `Rolling option fetch failed (${status}) for ${strikeKey} ${right}`,
-      status,
-    );
+      if (status >= 400 || payload.status === "failed") {
+        throw new DhanApiError(
+          payload.errorMessage ||
+            payload.message ||
+            payload.remarks ||
+            `Rolling option fetch failed (${status}) for ${strikeKey} ${right}`,
+          status,
+        );
+      }
+
+      const bars =
+        right === "CALL"
+          ? mapSide(payload.data?.ce ?? undefined)
+          : mapSide(payload.data?.pe ?? undefined);
+
+      await writeCache(file, bars);
+      return { bars, cached: false };
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      const retriable =
+        /timeout|fetch failed|ECONNRESET|ENOTFOUND|UND_ERR|socket|network|502|503|504/i.test(
+          message,
+        ) ||
+        (error instanceof DhanApiError &&
+          (error.status === 429 || error.status >= 500));
+      if (!retriable || attempt === maxAttempts) throw error;
+      const waitMs = Math.min(30_000, 2_000 * attempt);
+      console.warn(
+        `[rolling] retry ${attempt}/${maxAttempts} ${instrument.id} ${strikeKey} ${right} ${fromDate}: ${message}`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
   }
-
-  const bars =
-    right === "CALL" ? mapSide(payload.data?.ce ?? undefined) : mapSide(payload.data?.pe ?? undefined);
-
-  await writeCache(file, bars);
-  return { bars, cached: false };
+  throw lastError;
 }
 
 /** Merge bars by timestamp (later chunk overwrites). */

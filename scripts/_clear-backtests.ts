@@ -12,7 +12,7 @@ try {
   /* ignore */
 }
 
-const { bootCloudStores } = await import("../app/lib/store/boot");
+const { bootCloudStores } = await import("../app/lib/store/boot.server");
 await bootCloudStores();
 const {
   pullBacktestStore,

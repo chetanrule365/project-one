@@ -1,6 +1,6 @@
 import type { Route } from "./+types/api.trades.id.delete";
 import { bootSession } from "../lib/session.server";
-import { deletePaperTrade, pullPaperStore } from "../lib/lab/paper-store";
+import { deletePaperTrade, pullPaperStore } from "../lib/lab/paper-store.server";
 
 export async function action({ params, request }: Route.ActionArgs) {
   if (request.method !== "DELETE") {

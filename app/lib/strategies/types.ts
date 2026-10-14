@@ -1,6 +1,6 @@
-import type { OptionChainRow } from "../dhan/option-chain";
+import type { OptionChainRow } from "../dhan/option-chain-types";
 import type { IndexInstrument } from "../dhan/instruments";
-import type { RollingBar } from "../dhan/rolling-options";
+import type { RollingBar } from "../dhan/rolling-bar";
 
 export type OptionRight = "CE" | "PE";
 
@@ -117,6 +117,8 @@ export type EntryContext = {
   expirySession?: boolean;
   /** Fresh 5-minute trap or held break for the sweep sleeve. */
   sweep?: SweepSignal | null;
+  /** Backtest override for the ORB entry window. Live uses the default. */
+  orbWindow?: OrbWindow;
 };
 
 export type Strategy = {
@@ -206,6 +208,46 @@ export const NO_LONG_AFTER_HOUR = 13;
 
 /** ORB ATM entries only in this IST hour window (10 ≤ hour < this). */
 export const ORB_ENTRY_UNTIL_HOUR = 11;
+
+/** No ORB entry before 10:15 IST — 10:00–10:10 breaks were mostly opening noise. */
+export const ORB_EARLIEST_MINUTE = 15;
+
+/** ORB positions ride the trend until this IST hour (stop / take-profit can exit earlier). */
+export const ORB_FLAT_BY_HOUR = 14;
+
+/** ORB entry window and flatten time, in IST minutes since midnight. End is exclusive. */
+export type OrbWindow = {
+  startMin: number;
+  endMin: number;
+  flatMin: number;
+  /** "sell" writes a credit spread in the break direction instead of buying. */
+  side?: "buy" | "sell";
+  /** Sell only: short strike steps OTM from ATM (0 = ATM). Hedge sits 2 steps further. */
+  shortOffsetSteps?: number;
+  stopMult?: number;
+  takeProfitFrac?: number;
+};
+
+export const DEFAULT_ORB_WINDOW: OrbWindow = {
+  startMin: 10 * 60 + ORB_EARLIEST_MINUTE,
+  endMin: ORB_ENTRY_UNTIL_HOUR * 60,
+  flatMin: ORB_FLAT_BY_HOUR * 60,
+};
+
+export function inOrbWindow(
+  hour: number,
+  minute: number | undefined,
+  window: OrbWindow = DEFAULT_ORB_WINDOW,
+) {
+  if (minute === undefined) {
+    return (
+      hour >= Math.floor(window.startMin / 60) &&
+      hour < Math.ceil(window.endMin / 60)
+    );
+  }
+  const t = hour * 60 + minute;
+  return t >= window.startMin && t < window.endMin;
+}
 
 /** Quiet day: prior range below this % of spot */
 export const QUIET_PRIOR_RANGE_PCT = 1.8;

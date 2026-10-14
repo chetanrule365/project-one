@@ -10,19 +10,19 @@ import {
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { getDataDir } from "../data-dir";
-import { getPin } from "../dhan/pin";
-import { getAccessToken } from "../dhan/auth";
+import { getPin } from "../dhan/pin.server";
+import { getAccessToken } from "../dhan/auth.server";
 import {
   dispatchBacktestToCloud,
   isCloudBacktestClient,
   isCloudRuntime,
   keepCloudAwake,
 } from "./backtest-cloud";
-import { kvGet, kvSet } from "../store/kv";
-import { isMongoConfigured } from "../mongo";
+import { kvGet, kvSet } from "../store/kv.server";
+import { isMongoConfigured } from "../mongo.server";
 import type { IndexInstrument } from "../dhan/instruments";
-import { countRollingChunks } from "../dhan/rolling-options";
-import type { RollingProgress } from "../dhan/rolling-options";
+import { countRollingChunks } from "../dhan/rolling-options.server";
+import type { RollingProgress } from "../dhan/rolling-options.server";
 import { strikeKey } from "../strategies/common";
 import { atmBandKeys } from "../strategies/expiry-day";
 import {
@@ -401,8 +401,8 @@ function runInProcess(payload: {
   setTimeout(() => {
     void (async () => {
       try {
-        const { runBacktest } = await import("./backtest");
-        const { saveBacktest } = await import("./backtest-store");
+        const { runBacktest } = await import("./backtest.server");
+        const { saveBacktest } = await import("./backtest-store.server");
         const result = await runBacktest({
           instrument: payload.instrument,
           strategyIds: payload.strategyIds,

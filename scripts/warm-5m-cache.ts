@@ -10,20 +10,20 @@
  */
 import { readFileSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { INDEX_INSTRUMENTS, getIndexByParam } from "../app/lib/dhan/instruments";
-import { loadSweepBars } from "../app/lib/dhan/intraday-5m";
+import { loadSweepBars } from "../app/lib/dhan/intraday-5m.server";
 import {
   fetchRollingBundle,
   startOptionCacheSync,
-} from "../app/lib/dhan/rolling-options";
-import { getAccessToken } from "../app/lib/dhan/auth";
-import { takeWorkerPin } from "../app/lib/dhan/pin";
+} from "../app/lib/dhan/rolling-options.server";
+import { getAccessToken } from "../app/lib/dhan/auth.server";
+import { takeWorkerPin } from "../app/lib/dhan/pin.server";
 import { getCacheDir } from "../app/lib/data-dir";
 import { atmBandKeys } from "../app/lib/strategies/expiry-day";
 import { strikeKey } from "../app/lib/strategies/common";
 import { projectOneStrategy } from "../app/lib/strategies/project-one";
 import { sweepFadeStrategy } from "../app/lib/strategies/liquidity-sweep";
-import { bootCloudStores } from "../app/lib/store/boot";
-import { isMongoConfigured, mongoCollection } from "../app/lib/mongo";
+import { bootCloudStores } from "../app/lib/store/boot.server";
+import { isMongoConfigured, mongoCollection } from "../app/lib/mongo.server";
 
 try {
   for (const line of readFileSync(".env", "utf8").split(/\r?\n/)) {
@@ -49,7 +49,15 @@ const onlyIds = onlyArg
   : [];
 const instruments = onlyIds.length
   ? onlyIds
-      .map((id) => getIndexByParam(id))
+      .map((id) => {
+        const row = getIndexByParam(id);
+        if (!row) {
+          console.warn(
+            `[warm] unknown instrument "${id}" (use NIFTY, BANKNIFTY, SENSEX)`,
+          );
+        }
+        return row;
+      })
       .filter((row): row is (typeof INDEX_INSTRUMENTS)[number] => Boolean(row))
   : INDEX_INSTRUMENTS;
 const months = 12;
@@ -146,7 +154,14 @@ console.log(`[warm] instruments: ${instruments.map((i) => i.id).join(", ")}`);
 
 const started = Date.now();
 for (const instrument of instruments) {
-  await warmInstrument(instrument);
+  try {
+    await warmInstrument(instrument);
+  } catch (error) {
+    console.error(
+      `[warm] ${instrument.id} failed:`,
+      error instanceof Error ? error.message : error,
+    );
+  }
 }
 
 console.log("[warm] uploading local cache to Mongo…");

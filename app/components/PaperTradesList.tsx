@@ -15,7 +15,9 @@ type PaperTradeRow = {
   short_side: string;
   credit: number;
   margin_inr?: number;
+  brokerage_inr?: number | null;
   pnl_inr: number | null;
+  pnl_after_brokerage_inr?: number | null;
   entry_at: string;
   exit_at?: string | null;
   legs?: PaperLeg[];
@@ -101,6 +103,12 @@ function ActiveDot() {
   );
 }
 
+function netPnl(trade: PaperTradeRow) {
+  if (trade.pnl_after_brokerage_inr != null) return trade.pnl_after_brokerage_inr;
+  if (trade.pnl_inr == null) return null;
+  return trade.pnl_inr - (trade.brokerage_inr ?? 0);
+}
+
 function pnlClass(pnl: number | null) {
   if (pnl == null) return "text-slate-500";
   if (pnl > 0) return "text-emerald-600 dark:text-emerald-400";
@@ -129,45 +137,53 @@ export function PaperTradesList({ trades }: { trades: PaperTradeRow[] }) {
   return (
     <>
       <ul className="mt-4 space-y-2 md:hidden">
-        {trades.map((trade) => (
-          <li
-            key={trade.id}
-            className={`rounded-xl border border-slate-200 px-3 py-3 dark:border-slate-800 ${rowAccent(trade.pnl_inr, trade.status)}`}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-                  {trade.status === "open" ? <ActiveDot /> : null}
-                  {trade.instrument_id ?? "—"}
-                </p>
-                <p className="mt-0.5 text-xs text-slate-500">
-                  {trade.strategy_id}
-                </p>
+        {trades.map((trade) => {
+          const net = netPnl(trade);
+          return (
+            <li
+              key={trade.id}
+              className={`rounded-xl border border-slate-200 px-3 py-3 dark:border-slate-800 ${rowAccent(net, trade.status)}`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+                    {trade.status === "open" ? <ActiveDot /> : null}
+                    {trade.instrument_id ?? "—"}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {trade.strategy_id}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span
+                    className={`text-sm font-medium tabular-nums ${pnlClass(net)}`}
+                  >
+                    {net === null ? "Open" : `₹ ${formatNumber(net, 0)}`}
+                  </span>
+                  {trade.brokerage_inr != null ? (
+                    <p className="mt-0.5 text-[11px] tabular-nums text-slate-400">
+                      Brok ₹ {formatNumber(trade.brokerage_inr, 0)}
+                    </p>
+                  ) : null}
+                </div>
               </div>
-              <span
-                className={`text-sm font-medium tabular-nums ${pnlClass(trade.pnl_inr)}`}
-              >
-                {trade.pnl_inr === null
-                  ? "Open"
-                  : `₹ ${formatNumber(trade.pnl_inr, 0)}`}
-              </span>
-            </div>
-            <p className="mt-2 text-xs tabular-nums text-slate-600 dark:text-slate-300">
-              {formatLegs(trade)}
-              <span className="text-slate-400"> · </span>
-              {formatPremium(trade.credit)}
-              {trade.margin_inr != null ? (
-                <>
-                  <span className="text-slate-400"> · </span>
-                  Margin ₹ {formatNumber(trade.margin_inr, 0)}
-                </>
-              ) : null}
-            </p>
-            <p className="mt-1 text-xs tabular-nums text-slate-400">
-              {formatWhen(trade)}
-            </p>
-          </li>
-        ))}
+              <p className="mt-2 text-xs tabular-nums text-slate-600 dark:text-slate-300">
+                {formatLegs(trade)}
+                <span className="text-slate-400"> · </span>
+                {formatPremium(trade.credit)}
+                {trade.margin_inr != null ? (
+                  <>
+                    <span className="text-slate-400"> · </span>
+                    Margin ₹ {formatNumber(trade.margin_inr, 0)}
+                  </>
+                ) : null}
+              </p>
+              <p className="mt-1 text-xs tabular-nums text-slate-400">
+                {formatWhen(trade)}
+              </p>
+            </li>
+          );
+        })}
       </ul>
       <div className="mt-4 hidden overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800 md:block">
         <table className="min-w-full text-sm">
@@ -179,45 +195,58 @@ export function PaperTradesList({ trades }: { trades: PaperTradeRow[] }) {
               <th className="px-3 py-2 text-right">Legs</th>
               <th className="px-3 py-2 text-right">Premium</th>
               <th className="px-3 py-2 text-right">Margin ₹</th>
-              <th className="px-3 py-2 text-right">P&L ₹</th>
+              <th className="px-3 py-2 text-right">Gross ₹</th>
+              <th className="px-3 py-2 text-right">Brok ₹</th>
+              <th className="px-3 py-2 text-right">Net ₹</th>
             </tr>
           </thead>
           <tbody>
-            {trades.map((trade) => (
-              <tr
-                key={trade.id}
-                className={`border-t border-slate-100 dark:border-slate-800 ${rowAccent(trade.pnl_inr, trade.status)}`}
-              >
-                <td className="px-3 py-2">
-                  <span className="inline-flex items-center gap-2">
-                    {trade.status === "open" ? <ActiveDot /> : null}
-                    {trade.instrument_id ?? "—"}
-                  </span>
-                </td>
-                <td className="px-3 py-2">{trade.strategy_id}</td>
-                <td className="px-3 py-2 tabular-nums">
-                  {formatWhen(trade)}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums">
-                  {formatLegs(trade)}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums">
-                  {formatPremium(trade.credit)}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums">
-                  {trade.margin_inr == null
-                    ? "—"
-                    : formatNumber(trade.margin_inr, 0)}
-                </td>
-                <td
-                  className={`px-3 py-2 text-right font-medium tabular-nums ${pnlClass(trade.pnl_inr)}`}
+            {trades.map((trade) => {
+              const net = netPnl(trade);
+              return (
+                <tr
+                  key={trade.id}
+                  className={`border-t border-slate-100 dark:border-slate-800 ${rowAccent(net, trade.status)}`}
                 >
-                  {trade.pnl_inr === null
-                    ? "—"
-                    : formatNumber(trade.pnl_inr, 0)}
-                </td>
-              </tr>
-            ))}
+                  <td className="px-3 py-2">
+                    <span className="inline-flex items-center gap-2">
+                      {trade.status === "open" ? <ActiveDot /> : null}
+                      {trade.instrument_id ?? "—"}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">{trade.strategy_id}</td>
+                  <td className="px-3 py-2 tabular-nums">
+                    {formatWhen(trade)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {formatLegs(trade)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {formatPremium(trade.credit)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {trade.margin_inr == null
+                      ? "—"
+                      : formatNumber(trade.margin_inr, 0)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-500">
+                    {trade.pnl_inr === null
+                      ? "—"
+                      : formatNumber(trade.pnl_inr, 0)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-500">
+                    {trade.brokerage_inr == null
+                      ? "—"
+                      : formatNumber(trade.brokerage_inr, 0)}
+                  </td>
+                  <td
+                    className={`px-3 py-2 text-right font-medium tabular-nums ${pnlClass(net)}`}
+                  >
+                    {net === null ? "—" : formatNumber(net, 0)}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

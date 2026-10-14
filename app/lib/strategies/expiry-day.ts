@@ -1,5 +1,5 @@
-import type { OptionChainRow } from "../dhan/option-chain";
-import type { RollingBar } from "../dhan/rolling-options";
+import type { OptionChainRow } from "../dhan/option-chain-types";
+import type { RollingBar } from "../dhan/rolling-bar";
 import {
   LIVE_QUIET_RANGE_PCT,
   MAX_DAILY_DEBIT_PTS,

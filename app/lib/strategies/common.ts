@@ -1,4 +1,4 @@
-import type { OptionChainRow, OptionSide } from "../dhan/option-chain";
+import type { OptionChainRow, OptionSide } from "../dhan/option-chain-types";
 import type {
   Leg,
   OpenPosition,
@@ -50,10 +50,10 @@ export function markLeg(
   premiums?: Record<string, number>,
 ) {
   if (leg.strike <= 0) return 0;
-  const keyed = premiums?.[`${leg.strikeKey}:${leg.right}`];
-  if (keyed !== undefined && keyed >= 0) return keyed;
   const byStrike = premiums?.[`${leg.strike}:${leg.right}`];
   if (byStrike !== undefined && byStrike >= 0) return byStrike;
+  const keyed = premiums?.[`${leg.strikeKey}:${leg.right}`];
+  if (keyed !== undefined && keyed >= 0) return keyed;
   return intrinsic(leg.right, leg.strike, spot);
 }
 

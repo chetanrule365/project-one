@@ -1,11 +1,11 @@
 import type { Route } from "./+types/api.backtest-run";
 import { getIndexByParam } from "../lib/dhan/instruments";
-import { bootCloudStores } from "../lib/store/boot";
+import { bootCloudStores } from "../lib/store/boot.server";
 import {
   cloudWorkerSecret,
   isCloudRuntime,
 } from "../lib/lab/backtest-cloud";
-import { startBacktestJob } from "../lib/lab/backtest-job";
+import { startBacktestJob } from "../lib/lab/backtest-job.server";
 
 export async function action({ request }: Route.ActionArgs) {
   if (request.method !== "POST") {

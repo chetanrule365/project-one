@@ -1,6 +1,6 @@
 import { Form, redirect, useNavigation, useSearchParams } from "react-router";
 import type { Route } from "./+types/settings";
-import { clearToken, generateViaTotp, getAuthStatus } from "../lib/dhan/auth";
+import { clearToken, generateViaTotp, getAuthStatus } from "../lib/dhan/auth.server";
 import { bootSession } from "../lib/session.server";
 
 export function meta({}: Route.MetaArgs) {

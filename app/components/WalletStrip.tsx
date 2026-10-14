@@ -10,6 +10,18 @@ function equityTone(equity: number, start: number) {
   return "text-slate-900 dark:text-white";
 }
 
+function signedInr(value: number) {
+  if (value > 0) return `+₹ ${formatInr(value)}`;
+  if (value < 0) return `−₹ ${formatInr(Math.abs(value))}`;
+  return `₹ ${formatInr(0)}`;
+}
+
+function signedTone(value: number) {
+  if (value > 0) return "text-emerald-600 dark:text-emerald-400";
+  if (value < 0) return "text-rose-600 dark:text-rose-400";
+  return "text-slate-900 dark:text-white";
+}
+
 export function WalletStrip({
   wallet,
   compact = false,
@@ -36,7 +48,7 @@ export function WalletStrip({
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
       <div>
         <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
           Equity
@@ -65,16 +77,30 @@ export function WalletStrip({
       </div>
       <div>
         <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
-          Realized
+          Gross P&L
         </p>
         <p
-          className={`mt-0.5 text-xl font-semibold tabular-nums ${equityTone(wallet.startInr + wallet.realizedInr, wallet.startInr)}`}
+          className={`mt-0.5 text-xl font-semibold tabular-nums ${signedTone(wallet.grossRealizedInr)}`}
         >
-          {wallet.realizedInr > 0
-            ? `+₹ ${formatInr(wallet.realizedInr)}`
-            : wallet.realizedInr < 0
-              ? `−₹ ${formatInr(Math.abs(wallet.realizedInr))}`
-              : `₹ ${formatInr(0)}`}
+          {signedInr(wallet.grossRealizedInr)}
+        </p>
+      </div>
+      <div>
+        <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
+          Brokerage
+        </p>
+        <p className="mt-0.5 text-xl font-semibold tabular-nums text-slate-900 dark:text-white">
+          ₹ {formatInr(wallet.brokerageInr)}
+        </p>
+      </div>
+      <div>
+        <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
+          Net P&L
+        </p>
+        <p
+          className={`mt-0.5 text-xl font-semibold tabular-nums ${signedTone(wallet.realizedInr)}`}
+        >
+          {signedInr(wallet.realizedInr)}
         </p>
       </div>
     </div>

@@ -15,15 +15,22 @@ describe("paper wallet", () => {
     assert.equal(wallet.equityInr, 100_000);
   });
 
-  it("locks open margin and books closed pnl", () => {
+  it("locks open margin and books closed pnl after brokerage", () => {
     const wallet = walletFromPaperTrades([
-      { status: "closed", pnl_inr: 2_500 },
+      {
+        status: "closed",
+        pnl_inr: 2_500,
+        brokerage_inr: 160,
+        pnl_after_brokerage_inr: 2_340,
+      },
       { status: "open", margin_inr: 71_000, mark_pnl_inr: -400 },
     ]);
-    assert.equal(wallet.realizedInr, 2_500);
+    assert.equal(wallet.grossRealizedInr, 2_500);
+    assert.equal(wallet.brokerageInr, 160);
+    assert.equal(wallet.realizedInr, 2_340);
     assert.equal(wallet.lockedInr, 71_000);
-    assert.equal(wallet.freeInr, 31_500);
-    assert.equal(wallet.equityInr, 102_100);
+    assert.equal(wallet.freeInr, 31_340);
+    assert.equal(wallet.equityInr, 101_940);
     assert.equal(canAffordMargin(wallet.freeInr, 71_000), false);
     assert.equal(canAffordMargin(wallet.freeInr, 3_000), true);
   });

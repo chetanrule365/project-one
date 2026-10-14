@@ -17,6 +17,7 @@ export type LiveTrade = {
   short_side: string;
   credit: number;
   margin_inr?: number;
+  brokerage_inr?: number | null;
   spot_entry: number;
   mark_spot?: number | null;
   mark_pnl_inr?: number | null;
@@ -142,8 +143,8 @@ export function LivePaperTrades({
 
       {trades.length === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-          No live paper trades right now. Project One sells credits on expiry
-          mornings (10:00–14:00 IST).
+          No live paper trades right now. Expiry Trend Credit enters on Nifty
+          expiry days at 12:30–12:45 IST.
         </p>
       ) : (
         <>
@@ -181,6 +182,12 @@ export function LivePaperTrades({
                       Margin ₹ {formatNumber(trade.margin_inr, 0)}
                     </>
                   ) : null}
+                  {trade.brokerage_inr != null ? (
+                    <>
+                      <span className="text-slate-400"> · </span>
+                      Brok ₹ {formatNumber(trade.brokerage_inr, 0)}
+                    </>
+                  ) : null}
                 </p>
                 <p className="mt-1 text-xs tabular-nums text-slate-400">
                   Spot {formatNumber(trade.spot_entry, 0)}
@@ -201,6 +208,7 @@ export function LivePaperTrades({
                   <th className="px-3 py-2 text-left">Legs</th>
                   <th className="px-3 py-2 text-right">Premium</th>
                   <th className="px-3 py-2 text-right">Margin ₹</th>
+                  <th className="px-3 py-2 text-right">Brok ₹</th>
                   <th className="px-3 py-2 text-right">Spot</th>
                   <th className="px-3 py-2 text-right">Live P&L ₹</th>
                 </tr>
@@ -231,6 +239,11 @@ export function LivePaperTrades({
                       {trade.margin_inr == null
                         ? "—"
                         : formatNumber(trade.margin_inr, 0)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-500">
+                      {trade.brokerage_inr == null
+                        ? "—"
+                        : formatNumber(trade.brokerage_inr, 0)}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       {formatNumber(trade.spot_entry, 0)}

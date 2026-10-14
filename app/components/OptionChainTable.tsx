@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import type { OptionChainRow, OptionSide } from "../lib/dhan/option-chain";
+import type { OptionChainRow, OptionSide } from "../lib/dhan/option-chain-types";
 
 function formatNumber(value: number, digits = 2) {
   if (!Number.isFinite(value)) return "—";

@@ -1,6 +1,6 @@
 import { Form, redirect, useNavigation, useSearchParams } from "react-router";
 import type { Route } from "./+types/login";
-import { clearLoginCooldown, clearToken, generateViaTotp } from "../lib/dhan/auth";
+import { clearLoginCooldown, clearToken, generateViaTotp } from "../lib/dhan/auth.server";
 import {
   clearPin,
   hasPin,
@@ -9,8 +9,8 @@ import {
   pinClearCookie,
   pinSetCookie,
   setPin,
-} from "../lib/dhan/pin";
-import { bootCloudStores } from "../lib/store/boot";
+} from "../lib/dhan/pin.server";
+import { bootCloudStores } from "../lib/store/boot.server";
 import { safeNextPath } from "../lib/next-path";
 
 export function meta({}: Route.MetaArgs) {

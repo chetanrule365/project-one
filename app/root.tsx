@@ -10,13 +10,13 @@ import {
 
 import type { Route } from "./+types/root";
 import { AppShell } from "./components/AppShell";
-import { hasPin, hydratePinFromRequest } from "./lib/dhan/pin";
-import { getPaperWallet } from "./lib/lab/paper";
-import { bootCloudStores } from "./lib/store/boot";
 import { safeNextPath } from "./lib/next-path";
 import "./app.css";
 
 export async function loader({ request }: Route.LoaderArgs) {
+  const { bootCloudStores } = await import("./lib/store/boot.server");
+  const { getPaperWallet } = await import("./lib/lab/paper.server");
+  const { hasPin, hydratePinFromRequest } = await import("./lib/dhan/pin.server");
   await bootCloudStores();
   hydratePinFromRequest(request);
   const url = new URL(request.url);

@@ -3,7 +3,7 @@ import {
   DhanConfigError,
   dhanRateLimitedPost,
   isDhanSandbox,
-} from "./config";
+} from "./config.server";
 import {
   INDEX_INSTRUMENTS,
   buildQuote,

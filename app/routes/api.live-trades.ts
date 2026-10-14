@@ -1,8 +1,8 @@
 import type { Route } from "./+types/api.live-trades";
 import { isCloudBacktestClient, keepCloudAwake } from "../lib/lab/backtest-cloud";
-import { getLivePaperTrades } from "../lib/lab/paper";
-import { ensurePaperWorker } from "../lib/lab/paper-worker";
-import { pullPaperStore } from "../lib/lab/paper-store";
+import { getLivePaperTrades } from "../lib/lab/paper.server";
+import { ensurePaperWorker } from "../lib/lab/paper-worker.server";
+import { pullPaperStore } from "../lib/lab/paper-store.server";
 import { bootSession } from "../lib/session.server";
 
 /**

@@ -1,6 +1,6 @@
 import type { Route } from "./+types/api.market-feed";
 import { getMarketFeed } from "../lib/dhan/feed";
-import { fetchIndexQuotes } from "../lib/dhan/quotes";
+import { fetchIndexQuotes } from "../lib/dhan/quotes.server";
 import { bootSession } from "../lib/session.server";
 
 export async function loader({ request }: Route.LoaderArgs) {

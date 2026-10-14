@@ -1,9 +1,10 @@
-import { listAllTradesWithInstrument, type PaperTradeExportRow } from "./paper-store";
+import { listAllTradesWithInstrument, type PaperTradeExportRow } from "./paper-store.server";
 import {
   formatIstTimestamp,
   formatPaperLegPrices,
   formatPaperLegs,
 } from "./paper-position";
+import { paperTradeBrokerageInr, paperTradeNetPnlInr } from "./paper.server";
 
 const HEADERS = [
   "Trade ID",
@@ -25,6 +26,8 @@ const HEADERS = [
   "Spot exit",
   "P&L points",
   "P&L INR",
+  "Brokerage INR",
+  "P&L after brokerage INR",
   "Entry date",
   "Expiry",
   "Expiry session",
@@ -73,6 +76,8 @@ function tradeRow(trade: PaperTradeExportRow) {
     trade.spot_exit,
     trade.pnl_points,
     trade.pnl_inr,
+    paperTradeBrokerageInr(trade),
+    paperTradeNetPnlInr(trade),
     trade.entry_at,
     trade.expiry_at,
     trade.expiry_session === true ? "true" : "false",

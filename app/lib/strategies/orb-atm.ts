@@ -15,7 +15,8 @@ import {
   orbFightsMaxPain,
 } from "./expiry-day";
 import {
-  ORB_ENTRY_UNTIL_HOUR,
+  inOrbWindow,
+  ORB_FLAT_BY_HOUR,
   STOP_LOSS_DEBIT_FRAC,
   type EntryContext,
   type OpenPosition,
@@ -39,8 +40,9 @@ export const orbAtmStrategy = assertStrategy({
     return [strikeKey(-ORB_SPREAD_STEPS), strikeKey(0), strikeKey(ORB_SPREAD_STEPS)];
   },
   isEligible(ctx) {
-    if (ctx.hour < 10 || ctx.hour >= ORB_ENTRY_UNTIL_HOUR) return false;
-    if (ctx.structure.quietDay) return false;
+    if (!inOrbWindow(ctx.hour, ctx.minute, ctx.orbWindow)) return false;
+    // Quiet/chop is encoded in orb flags (one-sided break vs open). Do not
+    // also require prior-day quietDay — that blocked almost all backtest ORBs.
     const up = ctx.structure.orbBrokenUp;
     const down = ctx.structure.orbBrokenDown;
     if (up === down) return false;
@@ -56,6 +58,9 @@ export const orbAtmStrategy = assertStrategy({
     const up = ctx.structure.orbBrokenUp;
     const down = ctx.structure.orbBrokenDown;
     if (up === down) return null;
+    if (ctx.orbWindow?.side === "sell") {
+      return proposeOrbCredit(ctx, up ? "up" : "down", ctx.orbWindow.shortOffsetSteps ?? 0);
+    }
     const right = up ? "CE" : "PE";
     const longKey = strikeKey(0);
     const expiry = isExpirySessionCtx(ctx);
@@ -170,8 +175,54 @@ export const orbAtmStrategy = assertStrategy({
   },
 } satisfies Strategy);
 
+/** Up-break: bull put spread. Down-break: bear call spread. Short sits `offset` steps OTM. */
+function proposeOrbCredit(ctx: EntryContext, dir: "up" | "down", offset: number) {
+  const right = dir === "up" ? "PE" : "CE";
+  const away = dir === "up" ? -1 : 1;
+  const shortSteps = away * offset;
+  const longSteps = away * (offset + ORB_SPREAD_STEPS);
+
+  let shortPx: number | null | undefined;
+  let longPx: number | null | undefined;
+  let shortStrike: number | undefined;
+  let longStrike: number | undefined;
+  if (ctx.rows && ctx.rows.length > 0) {
+    const atm = atmIndex(ctx.rows, ctx.spot);
+    const shortRow = ctx.rows[atm + shortSteps];
+    const longRow = ctx.rows[atm + longSteps];
+    if (!shortRow || !longRow) return null;
+    shortPx = shortPremium(right === "CE" ? shortRow.ce : shortRow.pe);
+    longPx = longPremium(right === "CE" ? longRow.ce : longRow.pe);
+    shortStrike = shortRow.strike;
+    longStrike = longRow.strike;
+  } else {
+    shortPx = premiumAt(ctx.premiums, strikeKey(shortSteps), right);
+    longPx = premiumAt(ctx.premiums, strikeKey(longSteps), right);
+    shortStrike = strikeAt(ctx.strikes, strikeKey(shortSteps));
+    longStrike = strikeAt(ctx.strikes, strikeKey(longSteps));
+  }
+  if (!shortPx || !longPx || shortStrike === undefined || longStrike === undefined) {
+    return null;
+  }
+  const credit = shortPx - longPx;
+  if (credit <= 0) return null;
+  const width = Math.abs(shortStrike - longStrike);
+  return buildProposal({
+    strategyId: "ORB_ATM",
+    name: "ORB Credit Spread",
+    bias: dir === "up" ? "Bullish breakout" : "Bearish breakout",
+    description: `Sell ${right} credit spread on ORB ${dir}`,
+    legs: [
+      { right, strike: shortStrike, strikeKey: strikeKey(shortSteps), qty: -1, premium: shortPx },
+      { right, strike: longStrike, strikeKey: strikeKey(longSteps), qty: 1, premium: longPx },
+    ],
+    maxProfit: credit,
+    maxLoss: Math.max(0, width - credit),
+  });
+}
+
 export const ORB_DEFAULTS = {
   stopMult: STOP_LOSS_DEBIT_FRAC,
-  timeStopHours: 1,
-  flatByHour: ORB_ENTRY_UNTIL_HOUR,
+  takeProfitFrac: 1,
+  flatByHour: ORB_FLAT_BY_HOUR,
 };

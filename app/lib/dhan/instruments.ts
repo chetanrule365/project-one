@@ -19,8 +19,16 @@ export const SECURITY_ID_TO_INDEX = new Map(
 
 export function getIndexByParam(id: string | undefined) {
   if (!id) return undefined;
-  const normalized = id.trim().toUpperCase();
-  return INDEX_INSTRUMENTS.find((instrument) => instrument.id === normalized);
+  const normalized = id.trim().toUpperCase().replace(/[\s_-]+/g, "");
+  const aliases: Record<string, IndexId> = {
+    NIFTY: "NIFTY",
+    NIFTY50: "NIFTY",
+    BANKNIFTY: "BANKNIFTY",
+    BANKNIFTY50: "BANKNIFTY",
+    SENSEX: "SENSEX",
+  };
+  const key = aliases[normalized] ?? (normalized as IndexId);
+  return INDEX_INSTRUMENTS.find((instrument) => instrument.id === key);
 }
 
 export type IndexQuote = {

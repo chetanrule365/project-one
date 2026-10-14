@@ -3,7 +3,7 @@ import {
   getClientId,
   invalidateAccessToken,
   noteRejectedToken,
-} from "./auth";
+} from "./auth.server";
 import { DhanApiError, DhanConfigError } from "./errors";
 
 export { DhanApiError, DhanConfigError };
@@ -61,7 +61,7 @@ async function dhanPostOnce<T>(
     },
     body: JSON.stringify(body),
     redirect: "manual",
-    signal: AbortSignal.timeout(45_000),
+    signal: AbortSignal.timeout(90_000),
   });
 
   if (response.status >= 300 && response.status < 400) {

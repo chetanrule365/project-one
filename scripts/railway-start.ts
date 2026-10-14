@@ -9,7 +9,7 @@ import compression from "compression";
 import express from "express";
 import { createRequestHandler } from "@react-router/express";
 import { getDataDir } from "../app/lib/data-dir";
-import { jobStatusPayload } from "../app/lib/lab/job-status-payload";
+import { jobStatusPayload } from "../app/lib/lab/job-status-payload.server";
 
 // Log faults but do NOT exit — killing the process after listen causes Railway crash loops.
 process.on("uncaughtException", (error) => {

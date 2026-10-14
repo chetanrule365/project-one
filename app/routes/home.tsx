@@ -11,10 +11,10 @@ import {
   DhanConfigError,
   fetchIndexQuotes,
   isDhanSandbox,
-} from "../lib/dhan/quotes";
-import { getLivePaperTrades } from "../lib/lab/paper";
-import { ensurePaperWorker } from "../lib/lab/paper-worker";
-import { pullPaperStore } from "../lib/lab/paper-store";
+} from "../lib/dhan/quotes.server";
+import { getLivePaperTrades } from "../lib/lab/paper.server";
+import { ensurePaperWorker } from "../lib/lab/paper-worker.server";
+import { pullPaperStore } from "../lib/lab/paper-store.server";
 import { bootSession } from "../lib/session.server";
 
 type LiveTradesData = {

@@ -3,30 +3,42 @@ export const WALLET_START_INR = 100_000;
 
 export type WalletSnapshot = {
   startInr: number;
+  /** Closed P&L before brokerage. */
+  grossRealizedInr: number;
+  /** Closed P&L after brokerage. */
   realizedInr: number;
   unrealizedInr: number;
   lockedInr: number;
   freeInr: number;
   equityInr: number;
+  /** Sum of round-trip brokerage on closed trades. */
+  brokerageInr: number;
 };
 
 export function snapshotWallet(input: {
   startInr?: number;
   realizedInr: number;
+  grossRealizedInr?: number;
   unrealizedInr?: number;
   lockedInr: number;
+  brokerageInr?: number;
 }): WalletSnapshot {
   const startInr = input.startInr ?? WALLET_START_INR;
   const realizedInr = input.realizedInr;
+  const brokerageInr = input.brokerageInr ?? 0;
+  const grossRealizedInr =
+    input.grossRealizedInr ?? realizedInr + brokerageInr;
   const unrealizedInr = input.unrealizedInr ?? 0;
   const lockedInr = Math.max(0, input.lockedInr);
   return {
     startInr,
+    grossRealizedInr,
     realizedInr,
     unrealizedInr,
     lockedInr,
     freeInr: startInr + realizedInr - lockedInr,
     equityInr: startInr + realizedInr + unrealizedInr,
+    brokerageInr,
   };
 }
 
@@ -34,23 +46,38 @@ export function walletFromPaperTrades(
   trades: Array<{
     status: "open" | "closed";
     pnl_inr?: number | null;
+    pnl_after_brokerage_inr?: number | null;
+    brokerage_inr?: number | null;
     mark_pnl_inr?: number | null;
     margin_inr?: number | null;
   }>,
   startInr = WALLET_START_INR,
 ): WalletSnapshot {
+  let grossRealizedInr = 0;
   let realizedInr = 0;
   let unrealizedInr = 0;
   let lockedInr = 0;
+  let brokerageInr = 0;
   for (const trade of trades) {
     if (trade.status === "closed") {
-      realizedInr += trade.pnl_inr ?? 0;
+      const brok = trade.brokerage_inr ?? 0;
+      const gross = trade.pnl_inr ?? 0;
+      brokerageInr += brok;
+      grossRealizedInr += gross;
+      realizedInr += trade.pnl_after_brokerage_inr ?? gross - brok;
       continue;
     }
     lockedInr += trade.margin_inr ?? 0;
     unrealizedInr += trade.mark_pnl_inr ?? 0;
   }
-  return snapshotWallet({ startInr, realizedInr, unrealizedInr, lockedInr });
+  return snapshotWallet({
+    startInr,
+    grossRealizedInr,
+    realizedInr,
+    unrealizedInr,
+    lockedInr,
+    brokerageInr,
+  });
 }
 
 export function canAffordMargin(freeInr: number, marginInr: number) {

@@ -2,18 +2,17 @@ import type { Route } from "./+types/strategies";
 import { Link } from "react-router";
 import { PlaybookBoard } from "../components/PlaybookBoard";
 import { INDEX_INSTRUMENTS, getIndexByParam } from "../lib/dhan/instruments";
-import { loadOptionChainPage } from "../lib/dhan/option-chain";
+import { loadOptionChainPage } from "../lib/dhan/option-chain.server";
+import { DhanApiError, DhanConfigError } from "../lib/dhan/errors";
 import {
-  DhanApiError,
-  DhanConfigError,
   fetchIndexQuotes,
   fetchPriorSessionStats,
-} from "../lib/dhan/quotes";
-import { loadTodaySweepBars } from "../lib/dhan/intraday-5m";
+} from "../lib/dhan/quotes.server";
+import { loadTodaySweepBars } from "../lib/dhan/intraday-5m.server";
 import { buildPlaybookSnapshot, type PlaybookSnapshot } from "../lib/strategies/registry";
-import { getPaperWallet } from "../lib/lab/paper";
-import { ensurePaperWorker } from "../lib/lab/paper-worker";
-import { pullPaperStore } from "../lib/lab/paper-store";
+import { getPaperWallet } from "../lib/lab/paper.server";
+import { ensurePaperWorker } from "../lib/lab/paper-worker.server";
+import { pullPaperStore } from "../lib/lab/paper-store.server";
 import { bootSession } from "../lib/session.server";
 import { DEFAULT_WIDTH_STEPS } from "../lib/strategies/types";
 
@@ -136,10 +135,9 @@ export default function StrategiesPage(props: Route.ComponentProps) {
             Playbook
           </h1>
           <p className="mt-1.5 max-w-2xl text-sm leading-snug text-slate-500 dark:text-slate-400">
-            Project One and Sweep can both be on at the same time. Sweep fades
-            failed stop-hunts and sits out real breaks. Bank Nifty last Tuesday
-            only.
-            Simulation only — no real orders.{" "}
+            One strategy: Expiry Trend Credit. Nifty expiry day at 12:30 IST —
+            above the open, sell an OTM put spread; below, an OTM call spread.
+            Flat by 15:15. Simulation only — no real orders.{" "}
             <Link
               to="/paper"
               className="font-medium text-sky-700 underline-offset-2 hover:underline dark:text-sky-300"

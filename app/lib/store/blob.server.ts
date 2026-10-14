@@ -1,13 +1,12 @@
 import { gzipSync, gunzipSync } from "node:zlib";
-import { Binary } from "mongodb";
-import { isMongoConfigured, mongoCollection } from "../mongo";
+import { isMongoConfigured, mongoCollection } from "../mongo.server";
 
 const uploaded = new Set<string>();
 const MAX_GZIP_BYTES = 15 * 1024 * 1024;
 
 type BlobDoc = {
   _id: string;
-  gzip: Binary;
+  gzip: { buffer: Uint8Array } | Uint8Array | Buffer;
   updatedAt: Date;
 };
 
@@ -15,9 +14,12 @@ function gzipBytes(json: string) {
   return gzipSync(Buffer.from(json, "utf8"));
 }
 
-function gunzipBytes(data: Binary | Uint8Array | Buffer) {
-  const raw =
-    data instanceof Binary ? Buffer.from(data.buffer) : Buffer.from(data);
+function gunzipBytes(data: BlobDoc["gzip"]) {
+  const bytes =
+    data && typeof data === "object" && "buffer" in data
+      ? data.buffer
+      : data;
+  const raw = Buffer.from(bytes as Uint8Array);
   return gunzipSync(raw).toString("utf8");
 }
 
@@ -71,6 +73,7 @@ export async function blobSetJson(
       if (opts?.once) uploaded.delete(objectPath);
       return;
     }
+    const { Binary } = await import("mongodb");
     await col.updateOne(
       { _id: objectPath },
       { $set: { gzip: new Binary(new Uint8Array(body)), updatedAt: new Date() } },

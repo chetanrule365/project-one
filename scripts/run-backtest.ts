@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { INDEX_INSTRUMENTS, getIndexByParam } from "../app/lib/dhan/instruments";
-import { bootCloudStores } from "../app/lib/store/boot";
-import { runBacktest } from "../app/lib/lab/backtest";
-import { PROJECT_ONE_ID } from "../app/lib/strategies/project-one";
+import { bootCloudStores } from "../app/lib/store/boot.server";
+import { runBacktest } from "../app/lib/lab/backtest.server";
+import { EXPIRY_TREND_ID } from "../app/lib/strategies/expiry-trend-credit";
 
 try {
   for (const line of readFileSync(".env", "utf8").split(/\r?\n/)) {
@@ -25,7 +25,7 @@ for (let i = 2; i < process.argv.length; i += 1) {
 }
 
 const instrumentId = (args.get("instrument") ?? "NIFTY").toUpperCase();
-const strategyId = args.get("strategy") ?? PROJECT_ONE_ID;
+const strategyId = args.get("strategy") ?? EXPIRY_TREND_ID;
 const months = Number(args.get("months") ?? 6);
 const widthSteps = Number(args.get("width") ?? 2);
 const instrument = getIndexByParam(instrumentId) ?? INDEX_INSTRUMENTS[0];

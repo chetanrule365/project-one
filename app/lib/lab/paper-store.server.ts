@@ -1,4 +1,4 @@
-import { createJsonStore } from "../store/json-store";
+import { createJsonStore } from "../store/json-store.server";
 import type { Leg } from "../strategies/types";
 import { marginRequiredInr } from "./margin";
 import { isExpiryCalendarDay, normalizeExpiryDay } from "../strategies/expiry-day";
@@ -28,6 +28,8 @@ export type PaperTrade = {
   spot_exit: number | null;
   pnl_points: number | null;
   pnl_inr: number | null;
+  /** Round-trip Dhan brokerage in ₹ (entry+exit × legs). Older rows omit — derived. */
+  brokerage_inr?: number | null;
   /** ISO timestamp (IST offset on new rows; older rows may be YYYY-MM-DD). */
   entry_at: string;
   expiry_at: string;
@@ -224,6 +226,7 @@ export function closeTrade(
     spotExit: number;
     pnlPoints: number;
     pnlInr: number;
+    brokerageInr?: number;
     exitLegs?: Leg[];
   },
 ) {
@@ -234,6 +237,7 @@ export function closeTrade(
   trade.spot_exit = input.spotExit;
   trade.pnl_points = input.pnlPoints;
   trade.pnl_inr = input.pnlInr;
+  if (input.brokerageInr != null) trade.brokerage_inr = input.brokerageInr;
   trade.exit_legs = input.exitLegs;
   trade.exit_at = new Date().toISOString();
   save(state);

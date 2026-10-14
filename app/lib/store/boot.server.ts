@@ -1,9 +1,9 @@
-import { hydrateAuthStore } from "../dhan/auth";
-import { startOptionCacheSync } from "../dhan/rolling-options";
-import { hydrateBacktestJob } from "../lab/backtest-job";
-import { hydrateBacktestStore } from "../lab/backtest-store";
-import { hydratePaperStore } from "../lab/paper-store";
-import { isMongoConfigured } from "../mongo";
+import { hydrateAuthStore } from "../dhan/auth.server";
+import { startOptionCacheSync } from "../dhan/rolling-options.server";
+import { hydrateBacktestJob } from "../lab/backtest-job.server";
+import { hydrateBacktestStore } from "../lab/backtest-store.server";
+import { hydratePaperStore } from "../lab/paper-store.server";
+import { isMongoConfigured } from "../mongo.server";
 
 let boot: Promise<void> | null = null;
 

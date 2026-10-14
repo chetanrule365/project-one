@@ -1,17 +1,12 @@
-import { setDefaultResultOrder, setServers } from "node:dns";
-import { MongoClient, type Collection, type Db, type Document } from "mongodb";
-
-setDefaultResultOrder("ipv4first");
-if (process.platform === "win32") {
-  setServers(["8.8.8.8", "1.1.1.1"]);
-}
+import type { Collection, Db, Document } from "mongodb";
 
 const globalForMongo = globalThis as typeof globalThis & {
   __mongo?: {
-    client: MongoClient | null;
+    client: import("mongodb").MongoClient | null;
     db: Db | null;
     connecting: Promise<Db | null> | null;
     failedAt: number;
+    dnsReady?: boolean;
   };
 };
 
@@ -27,6 +22,21 @@ function memory() {
   return globalForMongo.__mongo;
 }
 
+function ensureDns() {
+  const mem = memory();
+  if (mem.dnsReady || typeof process === "undefined" || !process.versions?.node) {
+    return;
+  }
+  mem.dnsReady = true;
+  // Dynamic so the browser graph never evaluates node:dns.
+  void import("node:dns").then(({ setDefaultResultOrder, setServers }) => {
+    setDefaultResultOrder("ipv4first");
+    if (process.platform === "win32") {
+      setServers(["8.8.8.8", "1.1.1.1"]);
+    }
+  });
+}
+
 export function mongoUri() {
   return process.env.MONGODB_URI?.trim() || "";
 }
@@ -40,6 +50,7 @@ function mongoDbName() {
 }
 
 export async function getMongoDb(): Promise<Db | null> {
+  ensureDns();
   const mem = memory();
   if (mem.db) return mem.db;
   if (mem.failedAt && Date.now() - mem.failedAt < 15_000) return null;
@@ -48,6 +59,7 @@ export async function getMongoDb(): Promise<Db | null> {
   if (mem.connecting) return mem.connecting;
   mem.connecting = (async () => {
     try {
+      const { MongoClient } = await import("mongodb");
       const client = new MongoClient(uri, {
         maxPoolSize: 5,
         serverSelectionTimeoutMS: 12_000,

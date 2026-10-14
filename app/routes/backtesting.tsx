@@ -3,14 +3,14 @@ import { Link, useFetcher, useRevalidator } from "react-router";
 import type { Route } from "./+types/backtesting";
 import { INDEX_INSTRUMENTS, getIndexByParam } from "../lib/dhan/instruments";
 import { bootSession } from "../lib/session.server";
-import { DhanApiError, DhanConfigError } from "../lib/dhan/quotes";
+import { DhanApiError, DhanConfigError } from "../lib/dhan/quotes.server";
 import {
   DHAN_FNO_BROKERAGE_PER_ORDER,
   strategyNetRows,
   tradeBrokerageInr,
   tradeMarginInr,
   tradePnlAfterBrokerageInr,
-} from "../lib/lab/backtest";
+} from "../lib/lab/backtest-shared";
 import {
   lastBacktestJob,
   preferJob,
@@ -23,14 +23,14 @@ import {
   peekBacktestJob,
   pullBacktestJob,
   startBacktestJob,
-} from "../lib/lab/backtest-job";
+} from "../lib/lab/backtest-job.server";
 import {
   clearSavedBacktests,
   getBacktest,
   listBacktests,
   pullBacktestStore,
   type SavedBacktest,
-} from "../lib/lab/backtest-store";
+} from "../lib/lab/backtest-store.server";
 import {
   autoPlaybookStrategyIds,
   listBacktestStrategies,
@@ -93,7 +93,7 @@ export async function action({ request }: Route.ActionArgs) {
 
   try {
     const instrumentId = String(form.get("instrumentId") ?? "NIFTY");
-    const strategyMode = String(form.get("strategyId") ?? "PROJECT_ONE");
+    const strategyMode = String(form.get("strategyId") ?? "EXPIRY_TREND_CREDIT");
     const widthSteps = Number(form.get("widthSteps") ?? DEFAULT_WIDTH_STEPS);
     const months = Number(form.get("months") ?? 6);
     const instrument = getIndexByParam(instrumentId);
@@ -456,14 +456,11 @@ export default function BacktestingPage({
             Backtesting
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
-            Project One sells expiry and day-before credits and can hold a
-            trade at the same time as a 5-minute sweep. Fills, stops, and
-            take-profit are marked on 5-minute option candles. Sweep only fades
-            a failed stop-hunt; it does not ride breaks. Bank Nifty only on
-            last-Tuesday week. Project One flats at 14:00 (15:00 on expiry),
-            the sweep at 15:15. Each run starts with a ₹1 lakh wallet; a setup
-            is skipped when its margin does not fit remaining cash.
-            No real orders.
+            Expiry Trend Credit trades Nifty expiry days only. At 12:30 IST it
+            sells an OTM put spread if Nifty is above the open, or an OTM call
+            spread if below, with a 3× credit stop and a 15:15 flatten. Fills
+            and stops are marked on 5-minute option candles at each leg&apos;s
+            own strike. Each run starts with a ₹1 lakh wallet. No real orders.
           </p>
         </header>
 
@@ -553,7 +550,7 @@ export default function BacktestingPage({
               <span className="text-slate-500">Strategy</span>
               <select
                 name="strategyId"
-                defaultValue="PROJECT_ONE"
+                defaultValue="EXPIRY_TREND_CREDIT"
                 className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
               >
                 {loaderData.strategies.map((strategy) => (

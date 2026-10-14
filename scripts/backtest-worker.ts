@@ -1,15 +1,15 @@
 import { readFileSync } from "node:fs";
 import { getIndexByParam, INDEX_INSTRUMENTS } from "../app/lib/dhan/instruments";
-import { runBacktest } from "../app/lib/lab/backtest";
+import { runBacktest } from "../app/lib/lab/backtest.server";
 import {
   claimBacktestWorker,
   completeBacktestJob,
   failBacktestJob,
   reportBacktestProgress,
-} from "../app/lib/lab/backtest-job";
-import { takeWorkerPin } from "../app/lib/dhan/pin";
-import { bootCloudStores } from "../app/lib/store/boot";
-import { saveBacktest } from "../app/lib/lab/backtest-store";
+} from "../app/lib/lab/backtest-job.server";
+import { takeWorkerPin } from "../app/lib/dhan/pin.server";
+import { bootCloudStores } from "../app/lib/store/boot.server";
+import { saveBacktest } from "../app/lib/lab/backtest-store.server";
 
 try {
   for (const line of readFileSync(".env", "utf8").split(/\r?\n/)) {

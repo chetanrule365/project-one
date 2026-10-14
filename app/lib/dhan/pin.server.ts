@@ -1,4 +1,4 @@
-import { decryptSecret, encryptSecret } from "../secret";
+import { decryptSecret, encryptSecret } from "../secret.server";
 
 const COOKIE = "po_session";
 const MAX_AGE_SEC = 7 * 24 * 60 * 60;

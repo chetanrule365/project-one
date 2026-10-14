@@ -43,7 +43,8 @@ export function decidePaperExit(input: {
     : -risk * (defaults.stopMult ?? 2);
 
   if (input.pnlPoints <= stopLevel) {
-    return { pnlPoints: stopLevel, reason: "Stop" };
+    // A tick can gap through the stop; book the mark we actually saw.
+    return { pnlPoints: input.pnlPoints, reason: "Stop" };
   }
 
   if (!isIstTradingWeekday(input.today)) {
@@ -61,7 +62,10 @@ export function decidePaperExit(input: {
 
   const tpFrac = defaults.takeProfitFrac;
   if (tpFrac && input.pnlPoints >= risk * tpFrac) {
-    return { pnlPoints: input.pnlPoints, reason: "Take profit 60%" };
+    return {
+      pnlPoints: input.pnlPoints,
+      reason: `Take profit ${(tpFrac * 100).toFixed(0)}%`,
+    };
   }
 
   if (

@@ -19,7 +19,7 @@ export function marginRequiredInr(input: {
   return Math.max(0, input.width - input.credit) * lot;
 }
 
-function inferLegCount(input: {
+export function inferLegCount(input: {
   strategyId?: string | null;
   legCount?: number | null;
 }) {

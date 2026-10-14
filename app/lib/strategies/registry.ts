@@ -7,7 +7,6 @@ import {
   PM_SR_DEFAULTS,
 } from "./pm-sr-reversal";
 import {
-  PROJECT_ONE_ID,
   isProjectOne,
   projectOneDefaults,
   projectOneStrategy,
@@ -16,21 +15,23 @@ import {
   SWEEP_FADE_DEFAULTS,
   SWEEP_FADE_ID,
   detectLiquiditySweep,
-  sweepAllowsIndex,
   sweepBuffer,
   sweepFadeStrategy,
   sweepIsFresh,
   sweepPositionExtras,
   type SweepBar,
 } from "./liquidity-sweep";
+import {
+  EXPIRY_TREND_DEFAULTS,
+  EXPIRY_TREND_ID,
+  expiryTrendCreditStrategy,
+  inExpiryTrendWindow,
+} from "./expiry-trend-credit";
 import { proposalCoversCosts } from "./cost-filter";
 import {
   FLAT_BY_HOUR,
   STOP_LOSS_CREDIT_MULT,
-  inMorningEntryWindow,
-  inSweepEntryWindow,
   istClock,
-  MORNING_PLAYBOOK_WINDOW,
 } from "./types";
 import type {
   EntryContext,
@@ -39,7 +40,7 @@ import type {
   SweepSignal,
   TradeProposal,
 } from "./types";
-import type { OptionChainRow } from "../dhan/option-chain";
+import type { OptionChainRow } from "../dhan/option-chain-types";
 import {
   INDEX_INSTRUMENTS,
   type IndexInstrument,
@@ -49,8 +50,6 @@ import {
   chainAroundAtm,
   computeMaxPain,
   oiWalls,
-  daysToExpiry,
-  isMonthlyExpiryIndex,
   istWeekday,
   liveExpirySession,
 } from "./expiry-day";
@@ -77,10 +76,13 @@ export type PlaybookSnapshot = {
   }>;
 };
 
-const STRATEGIES: Strategy[] = [projectOneStrategy];
+const STRATEGIES: Strategy[] = [expiryTrendCreditStrategy];
 
+/** Retired from entries; kept so trades they already opened still settle and exit. */
 const LEGACY_STRATEGIES: Strategy[] = [
+  projectOneStrategy,
   orbAtmStrategy,
+  sweepFadeStrategy,
   oiRangeFadeStrategy,
   ironCondorStrategy,
   maxPainStrategy,
@@ -136,9 +138,7 @@ export function buildPlaybookSnapshot(
   });
   const isWeekend = weekday === 0 || weekday === 6;
   const isExpiryDay = liveExpirySession(instrument.id, expiry);
-  const inEntryWindow =
-    !isWeekend && (inMorningEntryWindow(hour) || inSweepEntryWindow(hour, minute));
-  const dte = daysToExpiry(instrument.id, today);
+  const inEntryWindow = !isWeekend && inExpiryTrendWindow(hour, minute);
   const sweep = detectLiquiditySweep({
     bars: tape.filter((bar) => bar.day === today),
     priorHigh: structure.priorHigh,
@@ -168,13 +168,8 @@ export function buildPlaybookSnapshot(
     requireCosts: boolean;
   }> = [
     {
-      strategy: projectOneStrategy,
-      blocked: "Outside 10:00–14:00 IST or a trend morning",
-      requireCosts: false,
-    },
-    {
-      strategy: sweepFadeStrategy,
-      blocked: "No failed stop-hunt between 10:00 and 12:00",
+      strategy: expiryTrendCreditStrategy,
+      blocked: "Nifty expiry day only, 12:30–12:45 IST",
       requireCosts: true,
     },
   ];
@@ -222,11 +217,13 @@ export function buildPlaybookSnapshot(
       ? null
       : isWeekend
         ? `${weekdayLabel} — market closed. Sitting out.`
-        : !inEntryWindow
-          ? `Outside ${MORNING_PLAYBOOK_WINDOW} IST. Sitting out.`
-          : isMonthlyExpiryIndex(instrument.id) && dte > 1
-            ? "Bank Nifty monthly expiry — sitting until the last-Tuesday week."
-            : "Project One has no edge here — sitting out.";
+        : instrument.id !== "NIFTY"
+          ? "Expiry Trend Credit trades Nifty only — sitting out."
+          : !isExpiryDay
+            ? "Not a Nifty expiry day — sitting out."
+            : !inEntryWindow
+              ? "Waiting for 12:30–12:45 IST on expiry day."
+              : "No trend vs open or credit too small — sitting out.";
 
   const path = playbookStrategies.map(({ strategy }) => {
     const card = spreads.find((s) => s.id === strategy.id);
@@ -257,37 +254,23 @@ export function buildPlaybookSnapshot(
 }
 
 export function autoPlaybookStrategyIds() {
-  return [PROJECT_ONE_ID, SWEEP_FADE_ID];
+  return [EXPIRY_TREND_ID];
 }
 
-/** Strategies shown in the backtest dropdown (includes a Both option). */
+/** Strategies shown in the backtest dropdown. */
 export function listBacktestStrategies() {
-  return [
-    { id: PROJECT_ONE_ID, name: projectOneStrategy.name },
-    { id: SWEEP_FADE_ID, name: sweepFadeStrategy.name },
-    { id: "BOTH", name: "Both (Project One + Sweep)" },
-  ];
+  return [{ id: EXPIRY_TREND_ID, name: expiryTrendCreditStrategy.name }];
 }
 
 export function pickPlaybookEntries(
   ctx: EntryContext,
 ): Array<{ strategy: Strategy; proposal: TradeProposal; reason: string }> {
   const picks: Array<{ strategy: Strategy; proposal: TradeProposal; reason: string }> = [];
-  if (projectOneStrategy.isEligible(ctx)) {
-    const proposal = projectOneStrategy.proposeEntry(ctx);
-    if (proposal) {
-      picks.push({
-        strategy: projectOneStrategy,
-        proposal,
-        reason: proposal.description,
-      });
-    }
-  }
-  if (sweepFadeStrategy.isEligible(ctx) && sweepAllowsIndex(ctx)) {
-    const proposal = sweepFadeStrategy.proposeEntry(ctx);
+  if (expiryTrendCreditStrategy.isEligible(ctx)) {
+    const proposal = expiryTrendCreditStrategy.proposeEntry(ctx);
     if (proposal && proposalCoversCosts(proposal, ctx.instrument.id).ok) {
       picks.push({
-        strategy: sweepFadeStrategy,
+        strategy: expiryTrendCreditStrategy,
         proposal,
         reason: proposal.description,
       });
@@ -324,6 +307,8 @@ export function positionDefaults(
       return { ...SWEEP_FADE_DEFAULTS, ...sweepPositionExtras(opts?.sweep) };
     case "PM_SR_REVERSAL":
       return PM_SR_DEFAULTS;
+    case EXPIRY_TREND_ID:
+      return EXPIRY_TREND_DEFAULTS;
     default:
       return { stopMult: STOP_LOSS_CREDIT_MULT, flatByHour: FLAT_BY_HOUR };
   }
