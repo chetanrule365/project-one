@@ -25,6 +25,7 @@ import {
   EXPIRY_TREND_DEFAULTS,
   EXPIRY_TREND_ID,
   expiryTrendCreditStrategy,
+  expiryTrendSpec,
   inExpiryTrendWindow,
 } from "./expiry-trend-credit";
 import { proposalCoversCosts } from "./cost-filter";
@@ -138,7 +139,9 @@ export function buildPlaybookSnapshot(
   });
   const isWeekend = weekday === 0 || weekday === 6;
   const isExpiryDay = liveExpirySession(instrument.id, expiry);
-  const inEntryWindow = !isWeekend && inExpiryTrendWindow(hour, minute);
+  const inEntryWindow =
+    !isWeekend && inExpiryTrendWindow(hour, minute, instrument.id);
+  const spec = expiryTrendSpec(instrument.id);
   const sweep = detectLiquiditySweep({
     bars: tape.filter((bar) => bar.day === today),
     priorHigh: structure.priorHigh,
@@ -169,7 +172,9 @@ export function buildPlaybookSnapshot(
   }> = [
     {
       strategy: expiryTrendCreditStrategy,
-      blocked: "Nifty expiry day only, 12:30–12:45 IST",
+      blocked: spec
+        ? `${instrument.name} expiry, ${Math.floor(spec.startMin / 60)}:${String(spec.startMin % 60).padStart(2, "0")} IST`
+        : "Bank Nifty is not in Expiry Trend Credit",
       requireCosts: true,
     },
   ];
@@ -217,13 +222,15 @@ export function buildPlaybookSnapshot(
       ? null
       : isWeekend
         ? `${weekdayLabel} — market closed. Sitting out.`
-        : instrument.id !== "NIFTY"
-          ? "Expiry Trend Credit trades Nifty only — sitting out."
+        : !spec
+          ? "Expiry Trend Credit skips Bank Nifty — sitting out."
           : !isExpiryDay
-            ? "Not a Nifty expiry day — sitting out."
+            ? `Not ${instrument.name} expiry — sitting out.`
             : !inEntryWindow
-              ? "Waiting for 12:30–12:45 IST on expiry day."
-              : "No trend vs open or credit too small — sitting out.";
+              ? `Waiting for ${Math.floor(spec.startMin / 60)}:${String(spec.startMin % 60).padStart(2, "0")} IST on expiry day.`
+              : spec.minMovePct > 0
+                ? `Need a ${spec.minMovePct}% move vs open, or credit too small — sitting out.`
+                : "No trend vs open or credit too small — sitting out.";
 
   const path = playbookStrategies.map(({ strategy }) => {
     const card = spreads.find((s) => s.id === strategy.id);

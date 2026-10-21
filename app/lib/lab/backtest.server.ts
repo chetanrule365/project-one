@@ -21,9 +21,8 @@ import {
 import { isProjectOne, projectOneStrategy } from "../strategies/project-one";
 import { isPmSrReversal } from "../strategies/pm-sr-reversal";
 import {
-  EXPIRY_TREND_END_MIN,
   EXPIRY_TREND_ID,
-  EXPIRY_TREND_START_MIN,
+  expiryTrendSpec,
 } from "../strategies/expiry-trend-credit";
 import {
   atmBandKeys,
@@ -113,6 +112,7 @@ function morningDecisionSlots(
     pmOnly: boolean;
     orbWindow: OrbWindow;
     wantExpiryTrend: boolean;
+    expiryTrend?: { startMin: number; endMin: number } | null;
   },
 ): Array<{ hour: number; minute: number }> {
   if (opts.pmOnly) return [{ hour: 14, minute: 0 }];
@@ -126,8 +126,9 @@ function morningDecisionSlots(
     }
     if (
       opts.wantExpiryTrend &&
-      t >= EXPIRY_TREND_START_MIN &&
-      t < EXPIRY_TREND_END_MIN
+      opts.expiryTrend &&
+      t >= opts.expiryTrend.startMin &&
+      t < opts.expiryTrend.endMin
     ) {
       mins.add(t);
     }
@@ -543,6 +544,7 @@ async function runTradeDays(
       pmOnly,
       orbWindow,
       wantExpiryTrend,
+      expiryTrend: expiryTrendSpec(instrument.id),
     });
     const fills: DayFill[] = [];
 

@@ -134,7 +134,7 @@ export function ensurePaperWorker() {
   s.started = true;
   ensureAlwaysOnPaperRuns();
   console.log(
-    "[paper-worker] started — Expiry Trend Credit on Nifty",
+    "[paper-worker] started — Expiry Trend Credit on Nifty and Sensex",
   );
   setTimeout(() => {
     void tick()

@@ -456,11 +456,10 @@ export default function BacktestingPage({
             Backtesting
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
-            Expiry Trend Credit trades Nifty expiry days only. At 12:30 IST it
-            sells an OTM put spread if Nifty is above the open, or an OTM call
-            spread if below, with a 3× credit stop and a 15:15 flatten. Fills
-            and stops are marked on 5-minute option candles at each leg&apos;s
-            own strike. Each run starts with a ₹1 lakh wallet. No real orders.
+            Expiry Trend Credit at 13:00 IST: Nifty Tuesday ATM with the
+            midday trend; Sensex Thursday ATM fade after a 0.2% move. Stop 3×
+            credit, flatten 15:15. Bank Nifty is skipped.
+            Marks use each leg&apos;s own strike. ₹1 lakh wallet. No real orders.
           </p>
         </header>
 

@@ -135,9 +135,9 @@ export default function StrategiesPage(props: Route.ComponentProps) {
             Playbook
           </h1>
           <p className="mt-1.5 max-w-2xl text-sm leading-snug text-slate-500 dark:text-slate-400">
-            One strategy: Expiry Trend Credit. Nifty expiry day at 12:30 IST —
-            above the open, sell an OTM put spread; below, an OTM call spread.
-            Flat by 15:15. Simulation only — no real orders.{" "}
+            One strategy: Expiry Trend Credit. Nifty Tuesday 13:00 ATM with
+            the trend. Sensex Thursday 13:00 fades a 0.2%+ move. Bank Nifty
+            skipped. Flat by 15:15. Simulation only — no real orders.{" "}
             <Link
               to="/paper"
               className="font-medium text-sky-700 underline-offset-2 hover:underline dark:text-sky-300"

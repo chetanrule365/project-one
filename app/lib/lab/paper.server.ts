@@ -140,15 +140,17 @@ export function getLivePaperTrades() {
   return { trades, totalPnlInr, asOf, wallet: snapshot.wallet };
 }
 
-/** Always-on paper: Expiry Trend Credit on Nifty. No start/stop required. */
+/** Always-on paper: Expiry Trend Credit on Nifty and Sensex. */
 export function ensureAlwaysOnPaperRuns() {
   const active = listActiveRuns();
-  if (!active.some((run) => run.instrument_id === "NIFTY")) {
-    startPaperRun({
-      instrumentId: "NIFTY",
-      strategyId: EXPIRY_TREND_ID,
-      widthSteps: DEFAULT_WIDTH_STEPS,
-    });
+  for (const instrumentId of ["NIFTY", "SENSEX"] as const) {
+    if (!active.some((run) => run.instrument_id === instrumentId)) {
+      startPaperRun({
+        instrumentId,
+        strategyId: EXPIRY_TREND_ID,
+        widthSteps: DEFAULT_WIDTH_STEPS,
+      });
+    }
   }
 }
 
@@ -327,15 +329,14 @@ export async function syncPaper(run?: PaperRun): Promise<{
 
   const stillOpen = listOpenTrades(active.id);
   const openStrategyIds = new Set(stillOpen.map((trade) => trade.strategy_id));
-  const expiryTrendWindow = inExpiryTrendWindow(hour, minute);
+  const expiryTrendWindow = inExpiryTrendWindow(hour, minute, instrument.id);
   const expiryTrendDoneToday = listTradesForRun(active.id).some(
     (trade) =>
       trade.strategy_id === EXPIRY_TREND_ID &&
       new Date(trade.entry_at).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) ===
         today,
   );
-  const wantExpiryTrend =
-    expiryTrendWindow && !expiryTrendDoneToday && instrument.id === "NIFTY";
+  const wantExpiryTrend = expiryTrendWindow && !expiryTrendDoneToday;
 
   if (!isIstTradingWeekday(today)) {
     return {
@@ -354,8 +355,8 @@ export async function syncPaper(run?: PaperRun): Promise<{
       opened: null,
       closed: closedTrades.at(-1) ?? null,
       message: closedTrades.length
-        ? "Closed paper trade. Entries only 12:30–12:45 IST on Nifty expiry."
-        : "Entries only 12:30–12:45 IST on Nifty expiry.",
+        ? "Closed paper trade. Entries only on Nifty Tue 13:00 or Sensex Thu 13:00 expiry."
+        : "Entries only on Nifty Tue 13:00 or Sensex Thu 13:00 expiry.",
     };
   }
 

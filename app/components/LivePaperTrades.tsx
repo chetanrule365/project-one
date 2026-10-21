@@ -143,8 +143,8 @@ export function LivePaperTrades({
 
       {trades.length === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-          No live paper trades right now. Expiry Trend Credit enters on Nifty
-          expiry days at 12:30–12:45 IST.
+          No live paper trades right now. Expiry Trend Credit enters at 13:00
+          IST on Nifty Tuesday or Sensex Thursday expiry.
         </p>
       ) : (
         <>
