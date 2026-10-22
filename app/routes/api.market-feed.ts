@@ -1,10 +1,45 @@
 import type { Route } from "./+types/api.market-feed";
+import { isDemoRequest } from "../lib/demo.server";
+import { demoFeedSnapshot } from "../lib/lab/demo-data.server";
 import { getMarketFeed } from "../lib/dhan/feed";
 import { fetchIndexQuotes } from "../lib/dhan/quotes.server";
 import { bootSession } from "../lib/session.server";
 
+function sseHeaders() {
+  return {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  };
+}
+
 export async function loader({ request }: Route.LoaderArgs) {
   await bootSession(request, "api");
+  if (isDemoRequest(request)) {
+    const snapshot = demoFeedSnapshot();
+    const stream = new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        controller.enqueue(
+          encoder.encode(`event: quotes\ndata: ${JSON.stringify(snapshot)}\n\n`),
+        );
+        const heartbeat = setInterval(() => {
+          controller.enqueue(encoder.encode(`: heartbeat\n\n`));
+        }, 15_000);
+        const cleanup = () => {
+          clearInterval(heartbeat);
+          try {
+            controller.close();
+          } catch {
+            // already closed
+          }
+        };
+        request.signal.addEventListener("abort", cleanup);
+      },
+    });
+    return new Response(stream, { headers: sseHeaders() });
+  }
   const feed = getMarketFeed();
 
   if (Object.keys(feed.getSnapshot().quotes).length === 0) {
@@ -58,12 +93,5 @@ export async function loader({ request }: Route.LoaderArgs) {
     },
   });
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-    },
-  });
+  return new Response(stream, { headers: sseHeaders() });
 }

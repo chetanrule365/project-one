@@ -2,6 +2,12 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Link, useFetcher, useRevalidator } from "react-router";
 import type { Route } from "./+types/backtesting";
 import { INDEX_INSTRUMENTS, getIndexByParam } from "../lib/dhan/instruments";
+import { isDemoRequest } from "../lib/demo.server";
+import {
+  demoBacktestJob,
+  demoSavedBacktest,
+  demoSavedBacktests,
+} from "../lib/lab/demo-data.server";
 import { bootSession } from "../lib/session.server";
 import { DhanApiError, DhanConfigError } from "../lib/dhan/quotes.server";
 import {
@@ -58,6 +64,17 @@ export function shouldRevalidate() {
 
 export async function loader({ request }: Route.LoaderArgs) {
   await bootSession(request);
+  if (isDemoRequest(request)) {
+    return {
+      instruments: INDEX_INSTRUMENTS,
+      strategies: listBacktestStrategies(),
+      history: demoSavedBacktests(),
+      saved: demoSavedBacktest(),
+      job: demoBacktestJob(),
+      cloudWorker: false,
+      demo: true,
+    };
+  }
   await pullBacktestJob();
   await pullBacktestStore();
   const runId = Number(new URL(request.url).searchParams.get("run") ?? "");
@@ -72,11 +89,20 @@ export async function loader({ request }: Route.LoaderArgs) {
     saved,
     job,
     cloudWorker: isCloudBacktestClient(),
+    demo: false,
   };
 }
 
 export async function action({ request }: Route.ActionArgs) {
   await bootSession(request);
+  if (isDemoRequest(request)) {
+    return {
+      ok: false as const,
+      error: "Demo is read-only. A sample Nifty 12-month run is already loaded.",
+      backtest: null,
+      job: demoBacktestJob(),
+    };
+  }
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "run");
 
@@ -389,6 +415,7 @@ export default function BacktestingPage({
   );
   const [tickJob, setTickJob] = useState<typeof loaderData.job | null>(null);
   useEffect(() => {
+    if (loaderData.demo) return;
     let on = true;
     const read = (url: string) => {
       const xhr = new XMLHttpRequest();
@@ -418,7 +445,7 @@ export default function BacktestingPage({
       on = false;
       window.clearInterval(id);
     };
-  }, [loaderData.cloudWorker]);
+  }, [loaderData.cloudWorker, loaderData.demo]);
   const job = preferJob(
     preferJob(loaderData.job, polled ?? loaderData.job),
     tickJob ?? loaderData.job,
@@ -590,7 +617,7 @@ export default function BacktestingPage({
             <div className="relative z-10 flex items-end">
               <button
                 type="submit"
-                disabled={running}
+                disabled={running || loaderData.demo}
                 className="w-full cursor-pointer rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-wait disabled:opacity-70 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
               >
                 {running
@@ -613,7 +640,7 @@ export default function BacktestingPage({
                 <input type="hidden" name="intent" value="clear-saved" />
                 <button
                   type="submit"
-                  disabled={clear.state !== "idle"}
+                  disabled={loaderData.demo || clear.state !== "idle"}
                   className="cursor-pointer text-xs font-medium text-slate-500 underline-offset-2 hover:text-rose-700 hover:underline disabled:cursor-wait dark:hover:text-rose-300"
                 >
                   {clear.state !== "idle" ? "Clearing…" : "Clear saved runs"}

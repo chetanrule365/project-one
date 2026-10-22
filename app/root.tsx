@@ -14,18 +14,29 @@ import { safeNextPath } from "./lib/next-path";
 import "./app.css";
 
 export async function loader({ request }: Route.LoaderArgs) {
+  const { isDemoRequest } = await import("./lib/demo.server");
+  const url = new URL(request.url);
+  if (url.pathname === "/login" || url.pathname === "/demo") {
+    return { unlocked: false, demo: false };
+  }
+  if (isDemoRequest(request)) {
+    const { demoPaperSnapshot } = await import("./lib/lab/demo-data.server");
+    return {
+      unlocked: true,
+      demo: true,
+      wallet: demoPaperSnapshot().wallet,
+    };
+  }
   const { bootCloudStores } = await import("./lib/store/boot.server");
   const { getPaperWallet } = await import("./lib/lab/paper.server");
   const { hasPin, hydratePinFromRequest } = await import("./lib/dhan/pin.server");
   await bootCloudStores();
   hydratePinFromRequest(request);
-  const url = new URL(request.url);
-  if (url.pathname === "/login") return { unlocked: hasPin() };
   if (!hasPin()) {
     const next = safeNextPath(url.pathname + url.search);
     throw redirect(`/login?next=${encodeURIComponent(next)}`);
   }
-  return { unlocked: true, wallet: getPaperWallet() };
+  return { unlocked: true, demo: false, wallet: getPaperWallet() };
 }
 
 export const links: Route.LinksFunction = () => [

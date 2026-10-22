@@ -1,4 +1,5 @@
 import { redirect } from "react-router";
+import { isDemoRequest } from "./demo.server";
 import { hasPin, hydratePinFromRequest } from "./dhan/pin.server";
 import { bootCloudStores } from "./store/boot.server";
 import { safeNextPath } from "./next-path";
@@ -7,6 +8,7 @@ export async function bootSession(
   request: Request,
   kind: "page" | "api" = "page",
 ) {
+  if (isDemoRequest(request)) return;
   await bootCloudStores();
   hydratePinFromRequest(request);
   if (hasPin()) return;

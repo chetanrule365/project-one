@@ -10,6 +10,7 @@ import {
   pinSetCookie,
   setPin,
 } from "../lib/dhan/pin.server";
+import { demoClearCookie } from "../lib/demo.server";
 import { bootCloudStores } from "../lib/store/boot.server";
 import { safeNextPath } from "../lib/next-path";
 
@@ -37,9 +38,10 @@ export async function action({ request }: Route.ActionArgs) {
   if (intent === "logout") {
     clearPin();
     clearToken();
-    return redirect("/login", {
-      headers: { "Set-Cookie": pinClearCookie(request) },
-    });
+    const headers = new Headers();
+    headers.append("Set-Cookie", pinClearCookie(request));
+    headers.append("Set-Cookie", demoClearCookie(request));
+    return redirect("/login", { headers });
   }
 
   const pin = String(form.get("pin") ?? "").replace(/\s+/g, "");
@@ -60,9 +62,10 @@ export async function action({ request }: Route.ActionArgs) {
           : "Could not unlock with that PIN.",
     };
   }
-  throw redirect(next, {
-    headers: { "Set-Cookie": pinSetCookie(pin, request) },
-  });
+  const headers = new Headers();
+  headers.append("Set-Cookie", pinSetCookie(pin, request));
+  headers.append("Set-Cookie", demoClearCookie(request));
+  throw redirect(next, { headers });
 }
 
 export default function LoginPage({ actionData }: Route.ComponentProps) {
@@ -124,6 +127,13 @@ export default function LoginPage({ actionData }: Route.ComponentProps) {
               {busy ? "Unlocking…" : "Unlock"}
             </button>
           </Form>
+
+          <a
+            href="/demo"
+            className="mt-4 block text-center text-sm font-medium text-slate-600 underline-offset-2 hover:underline dark:text-slate-300"
+          >
+            View a sample walkthrough
+          </a>
         </section>
       </div>
     </main>

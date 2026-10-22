@@ -58,9 +58,10 @@ function MenuIcon({ open }: { open: boolean }) {
 function SidebarNav() {
   const { pathname } = useLocation();
   const root = useRouteLoaderData("root") as
-    | { wallet?: WalletSnapshot }
+    | { wallet?: WalletSnapshot; demo?: boolean }
     | undefined;
   const wallet = root?.wallet;
+  const demo = Boolean(root?.demo);
 
   return (
     <nav className="flex h-full flex-col">
@@ -68,7 +69,9 @@ function SidebarNav() {
         <p className="text-sm font-semibold tracking-tight text-slate-900 dark:text-white">
           Project One
         </p>
-        <p className="mt-0.5 text-[11px] text-slate-500">Index lab</p>
+        <p className="mt-0.5 text-[11px] text-slate-500">
+          {demo ? "Sample walkthrough" : "Index lab"}
+        </p>
       </div>
       <ul className="flex-1 space-y-1 p-3">
         {links.map((link) => {
@@ -110,7 +113,7 @@ function SidebarNav() {
             type="submit"
             className="w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
           >
-            Lock
+            {demo ? "Exit demo" : "Lock"}
           </button>
         </Form>
       </div>
@@ -129,26 +132,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const revalidatorStateRef = useRef(revalidator.state);
   revalidateRef.current = revalidator.revalidate;
   revalidatorStateRef.current = revalidator.state;
+  const root = useRouteLoaderData("root") as { demo?: boolean } | undefined;
+  const demo = Boolean(root?.demo);
 
   useEffect(() => {
     setOpen(false);
   }, [location.pathname]);
 
   useEffect(() => {
+    if (demo) return;
     if (!location.pathname.startsWith("/backtesting")) return;
     const id = window.setInterval(() => {
       if (revalidatorStateRef.current === "idle") revalidateRef.current();
     }, 1000);
     return () => window.clearInterval(id);
-  }, [location.pathname]);
+  }, [demo, location.pathname]);
 
   useEffect(() => {
+    if (demo) return;
     if (!location.pathname.startsWith("/strategies")) return;
     const id = window.setInterval(() => {
       if (revalidatorStateRef.current === "idle") revalidateRef.current();
     }, 60_000);
     return () => window.clearInterval(id);
-  }, [location.pathname]);
+  }, [demo, location.pathname]);
 
   useEffect(() => {
     if (!open) return;
@@ -164,7 +171,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [open]);
 
-  if (location.pathname === "/login") {
+  if (location.pathname === "/login" || location.pathname === "/demo") {
     return <>{children}</>;
   }
 
@@ -173,7 +180,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {pending ? (
         <div className="fixed top-0 right-0 left-0 z-[200] h-0.5 bg-sky-500" />
       ) : null}
-
       <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-slate-200 bg-white/90 px-3 py-3 backdrop-blur md:hidden dark:border-slate-800 dark:bg-gray-950/90">
         <button
           type="button"
@@ -212,7 +218,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <SidebarNav />
       </aside>
 
-      <div className="relative z-0 md:pl-60">{children}</div>
+      <div className="relative z-0 md:pl-60">
+        {demo ? (
+          <div className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs font-medium text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/70 dark:text-amber-100">
+            Sample walkthrough — quotes, paper trades, and backtests are fixtures. Dhan is not connected.
+          </div>
+        ) : null}
+        {children}
+      </div>
     </div>
   );
 }

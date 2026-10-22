@@ -13,6 +13,8 @@ import {
   ensurePaperWorker,
 } from "../lib/lab/paper-worker.server";
 import { pullPaperStore } from "../lib/lab/paper-store.server";
+import { isDemoRequest } from "../lib/demo.server";
+import { demoPaperSnapshot } from "../lib/lab/demo-data.server";
 import { bootSession } from "../lib/session.server";
 
 export function meta({}: Route.MetaArgs) {
@@ -33,9 +35,11 @@ function monthFromSearch(value: string | null, fallback: string) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   await bootSession(request);
-  await pullPaperStore();
-  ensurePaperWorker();
-  const paper = getPaperSnapshot();
+  if (!isDemoRequest(request)) {
+    await pullPaperStore();
+    ensurePaperWorker();
+  }
+  const paper = isDemoRequest(request) ? demoPaperSnapshot() : getPaperSnapshot();
   const closedTrades = paper.trades.filter((trade) => trade.status === "closed");
   const currentMonth = currentMonthIst();
   const months = [

@@ -15,6 +15,8 @@ import {
 import { getLivePaperTrades } from "../lib/lab/paper.server";
 import { ensurePaperWorker } from "../lib/lab/paper-worker.server";
 import { pullPaperStore } from "../lib/lab/paper-store.server";
+import { isDemoRequest } from "../lib/demo.server";
+import { demoLivePaperTrades, demoQuotes } from "../lib/lab/demo-data.server";
 import { bootSession } from "../lib/session.server";
 
 type LiveTradesData = {
@@ -36,6 +38,14 @@ export function meta({}: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   await bootSession(request);
+  if (isDemoRequest(request)) {
+    return {
+      quotes: demoQuotes(),
+      sandbox: false,
+      live: demoLivePaperTrades() as LiveTradesData,
+      error: null as string | null,
+    };
+  }
   await pullPaperStore();
   ensurePaperWorker();
   const sandbox = isDhanSandbox();

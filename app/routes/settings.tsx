@@ -1,6 +1,8 @@
 import { Form, redirect, useNavigation, useSearchParams } from "react-router";
 import type { Route } from "./+types/settings";
 import { clearToken, generateViaTotp, getAuthStatus } from "../lib/dhan/auth.server";
+import { isDemoRequest } from "../lib/demo.server";
+import { demoAuthStatus } from "../lib/lab/demo-data.server";
 import { bootSession } from "../lib/session.server";
 
 export function meta({}: Route.MetaArgs) {
@@ -15,11 +17,17 @@ export function meta({}: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   await bootSession(request);
-  return { status: getAuthStatus() };
+  if (isDemoRequest(request)) {
+    return { status: demoAuthStatus(), demo: true };
+  }
+  return { status: getAuthStatus(), demo: false };
 }
 
 export async function action({ request }: Route.ActionArgs) {
   await bootSession(request);
+  if (isDemoRequest(request)) {
+    return { error: "Demo is read-only. Dhan is not connected in this walkthrough." };
+  }
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
 
@@ -63,7 +71,7 @@ function StatusBadge({ connected, expired }: { connected: boolean; expired: bool
 }
 
 export default function SettingsPage({ loaderData, actionData }: Route.ComponentProps) {
-  const { status } = loaderData;
+  const { status, demo } = loaderData;
   const [params] = useSearchParams();
   const navigation = useNavigation();
   const busyIntent =
@@ -87,6 +95,12 @@ export default function SettingsPage({ loaderData, actionData }: Route.Component
             app mints and refreshes the token for you — no daily copy-paste.
           </p>
         </header>
+
+        {demo ? (
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+            This walkthrough does not connect to Dhan. Token actions are disabled.
+          </div>
+        ) : null}
 
         {errorFlash ? (
           <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/50 dark:text-rose-200">
@@ -125,7 +139,7 @@ export default function SettingsPage({ loaderData, actionData }: Route.Component
                 <input type="hidden" name="intent" value="disconnect" />
                 <button
                   type="submit"
-                  disabled={busyIntent === "disconnect"}
+                  disabled={demo || busyIntent === "disconnect"}
                   className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                 >
                   {busyIntent === "disconnect" ? "Clearing…" : "Disconnect"}
@@ -180,7 +194,7 @@ export default function SettingsPage({ loaderData, actionData }: Route.Component
               <input type="hidden" name="intent" value="totp" />
               <button
                 type="submit"
-                disabled={!status.totpReady || busyIntent === "totp"}
+                disabled={demo || !status.totpReady || busyIntent === "totp"}
                 className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-40 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
               >
                 {busyIntent === "totp" ? "Generating…" : "Generate token now"}

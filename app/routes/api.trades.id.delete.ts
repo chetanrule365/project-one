@@ -1,4 +1,5 @@
 import type { Route } from "./+types/api.trades.id.delete";
+import { isDemoRequest } from "../lib/demo.server";
 import { bootSession } from "../lib/session.server";
 import { deletePaperTrade, pullPaperStore } from "../lib/lab/paper-store.server";
 
@@ -18,6 +19,12 @@ export async function action({ params, request }: Route.ActionArgs) {
 
   try {
     await bootSession(request, "api");
+    if (isDemoRequest(request)) {
+      return new Response(
+        JSON.stringify({ error: "Demo is read-only." }),
+        { status: 403, headers: { "Content-Type": "application/json" } },
+      );
+    }
     await pullPaperStore();
     const deletedTrade = deletePaperTrade(tradeId);
     if (!deletedTrade) {

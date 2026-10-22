@@ -7,6 +7,8 @@ import {
 import { INDEX_INSTRUMENTS, getIndexByParam } from "../lib/dhan/instruments";
 import { loadOptionChainPage } from "../lib/dhan/option-chain.server";
 import { DhanApiError, DhanConfigError } from "../lib/dhan/quotes.server";
+import { isDemoRequest } from "../lib/demo.server";
+import { demoOptionChain } from "../lib/lab/demo-data.server";
 import { bootSession } from "../lib/session.server";
 
 export function meta({ data }: Route.MetaArgs) {
@@ -26,6 +28,14 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 
   const url = new URL(request.url);
   const requestedExpiry = url.searchParams.get("expiry");
+
+  if (isDemoRequest(request)) {
+    return {
+      instrument,
+      chain: demoOptionChain(instrument.id),
+      error: null as string | null,
+    };
+  }
 
   try {
     const chain = await loadOptionChainPage(instrument, requestedExpiry);

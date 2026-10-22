@@ -13,6 +13,8 @@ import { buildPlaybookSnapshot, type PlaybookSnapshot } from "../lib/strategies/
 import { getPaperWallet } from "../lib/lab/paper.server";
 import { ensurePaperWorker } from "../lib/lab/paper-worker.server";
 import { pullPaperStore } from "../lib/lab/paper-store.server";
+import { isDemoRequest } from "../lib/demo.server";
+import { demoPaperSnapshot, demoPlaybookSnapshot } from "../lib/lab/demo-data.server";
 import { bootSession } from "../lib/session.server";
 import { DEFAULT_WIDTH_STEPS } from "../lib/strategies/types";
 
@@ -28,12 +30,34 @@ export function meta({}: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   await bootSession(request);
+  const url = new URL(request.url);
+  const demo = isDemoRequest(request);
+  const instrumentId = String(
+    url.searchParams.get("instrument") ?? (demo ? "SENSEX" : "NIFTY"),
+  );
+  const instrument = getIndexByParam(instrumentId) ?? INDEX_INSTRUMENTS[0];
+  if (demo) {
+    const widthParam = Number(url.searchParams.get("width") ?? DEFAULT_WIDTH_STEPS);
+    const widthSteps = Number.isFinite(widthParam)
+      ? Math.max(1, Math.min(5, Math.floor(widthParam)))
+      : DEFAULT_WIDTH_STEPS;
+    const snapshot = demoPlaybookSnapshot(instrument.id);
+    return {
+      instruments: INDEX_INSTRUMENTS,
+      playbook: {
+        instrument,
+        snapshot,
+        widthSteps,
+        expiry: snapshot.isExpiryDay ? "2026-10-22" : "2026-10-27",
+        spot: snapshot.structure.spot,
+        error: null,
+        walletFreeInr: demoPaperSnapshot().wallet.freeInr,
+      },
+    };
+  }
   await pullPaperStore();
   ensurePaperWorker();
   const wallet = getPaperWallet();
-  const url = new URL(request.url);
-  const instrumentId = String(url.searchParams.get("instrument") ?? "NIFTY");
-  const instrument = getIndexByParam(instrumentId) ?? INDEX_INSTRUMENTS[0];
   const widthParam = Number(url.searchParams.get("width") ?? DEFAULT_WIDTH_STEPS);
   const widthSteps = Number.isFinite(widthParam)
     ? Math.max(1, Math.min(5, Math.floor(widthParam)))
