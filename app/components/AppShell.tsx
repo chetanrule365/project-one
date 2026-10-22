@@ -141,15 +141,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (demo) return;
-    if (!location.pathname.startsWith("/backtesting")) return;
-    const id = window.setInterval(() => {
-      if (revalidatorStateRef.current === "idle") revalidateRef.current();
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [demo, location.pathname]);
-
-  useEffect(() => {
-    if (demo) return;
     if (!location.pathname.startsWith("/strategies")) return;
     const id = window.setInterval(() => {
       if (revalidatorStateRef.current === "idle") revalidateRef.current();

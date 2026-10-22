@@ -22,7 +22,8 @@ type JobPollGlobal = {
 
 const g = globalThis as typeof globalThis & JobPollGlobal;
 
-const POLL_URLS = ["/__backtest-job", "/api/backtest-job"];
+const POLL_URL = "/api/backtest-job";
+const POLL_MS = 1_000;
 
 function statusRank(status: JobSnapshot["status"]) {
   if (status === "done" || status === "error") return 2;
@@ -97,27 +98,30 @@ function parseJobPayload(text: string): JobSnapshot | null {
 
 function fetchSnapshot() {
   if (typeof window === "undefined") return;
-  for (const path of POLL_URLS) {
-    const xhr = new XMLHttpRequest();
-    xhr.open("GET", `${path}?t=${Date.now()}`);
-    xhr.setRequestHeader("Accept", "application/json");
-    xhr.setRequestHeader("Cache-Control", "no-store");
-    xhr.timeout = 4000;
-    xhr.onload = () => {
-      const job = parseJobPayload(xhr.responseText);
-      if (job) emit(job);
-    };
-    xhr.send();
-  }
+  const xhr = new XMLHttpRequest();
+  xhr.open("GET", `${POLL_URL}?t=${Date.now()}`);
+  xhr.setRequestHeader("Accept", "application/json");
+  xhr.setRequestHeader("Cache-Control", "no-store");
+  xhr.timeout = 4000;
+  xhr.onload = () => {
+    const job = parseJobPayload(xhr.responseText);
+    if (job) emit(job);
+  };
+  xhr.send();
 }
 
 export function startBacktestJobPolling() {
   if (typeof window === "undefined") return;
-  if (g.__projectOneJobPoll != null) {
-    window.clearInterval(g.__projectOneJobPoll);
-  }
+  if (g.__projectOneJobPoll != null) return;
   fetchSnapshot();
-  g.__projectOneJobPoll = window.setInterval(fetchSnapshot, 750);
+  g.__projectOneJobPoll = window.setInterval(fetchSnapshot, POLL_MS);
+}
+
+export function stopBacktestJobPolling() {
+  if (typeof window === "undefined") return;
+  if (g.__projectOneJobPoll == null) return;
+  window.clearInterval(g.__projectOneJobPoll);
+  g.__projectOneJobPoll = undefined;
 }
 
 export function lastBacktestJob() {
@@ -126,8 +130,8 @@ export function lastBacktestJob() {
 
 export function subscribeBacktestJob(onStoreChange: Listener) {
   listeners().add(onStoreChange);
-  startBacktestJobPolling();
   return () => {
     listeners().delete(onStoreChange);
+    if (listeners().size === 0) stopBacktestJobPolling();
   };
 }

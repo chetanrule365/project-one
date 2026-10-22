@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { Link, useFetcher, useRevalidator } from "react-router";
 import type { Route } from "./+types/backtesting";
 import { INDEX_INSTRUMENTS, getIndexByParam } from "../lib/dhan/instruments";
@@ -20,6 +20,8 @@ import {
 import {
   lastBacktestJob,
   preferJob,
+  startBacktestJobPolling,
+  stopBacktestJobPolling,
   subscribeBacktestJob,
 } from "../lib/lab/backtest-job-feed";
 import { isCloudBacktestClient } from "../lib/lab/backtest-cloud";
@@ -413,53 +415,24 @@ export default function BacktestingPage({
     lastBacktestJob,
     () => null,
   );
-  const [tickJob, setTickJob] = useState<typeof loaderData.job | null>(null);
-  useEffect(() => {
-    if (loaderData.demo) return;
-    let on = true;
-    const read = (url: string) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open("GET", `${url}?t=${Date.now()}`);
-      xhr.setRequestHeader("Accept", "application/json");
-      xhr.setRequestHeader("Cache-Control", "no-store");
-      xhr.onload = () => {
-        if (!on) return;
-        const text = String(xhr.responseText ?? "").trim();
-        if (!text || text.startsWith("<")) return;
-        try {
-          const payload = JSON.parse(text) as { job?: typeof loaderData.job };
-          if (payload.job) setTickJob((prev) => preferJob(prev, payload.job!));
-        } catch {
-          /* next tick */
-        }
-      };
-      xhr.send();
-    };
-    const tick = () => {
-      if (!loaderData.cloudWorker) read("/__backtest-job");
-      read("/api/backtest-job");
-    };
-    tick();
-    const id = window.setInterval(tick, 750);
-    return () => {
-      on = false;
-      window.clearInterval(id);
-    };
-  }, [loaderData.cloudWorker, loaderData.demo]);
-  const job = preferJob(
-    preferJob(loaderData.job, polled ?? loaderData.job),
-    tickJob ?? loaderData.job,
-  );
+  const job = preferJob(loaderData.job, polled ?? loaderData.job);
   const submitting = run.state !== "idle";
   const running = submitting || job.status === "running";
+  useEffect(() => {
+    if (loaderData.demo || !running) return;
+    startBacktestJobPolling();
+    return () => stopBacktestJobPolling();
+  }, [running, loaderData.demo]);
   const savedId = loaderData.saved?.id ?? null;
   const revalidateRef = useRef(revalidator.revalidate);
+  const fetchedResultRef = useRef<number | null>(null);
   revalidateRef.current = revalidator.revalidate;
   useEffect(() => {
-    if (job.status === "running") return;
-    if (job.status === "done" && job.resultId && job.resultId !== savedId) {
-      revalidateRef.current();
-    }
+    if (job.status !== "done" || !job.resultId) return;
+    if (job.resultId === savedId) return;
+    if (fetchedResultRef.current === job.resultId) return;
+    fetchedResultRef.current = job.resultId;
+    revalidateRef.current();
   }, [job.status, job.resultId, savedId]);
   const backtest = loaderData.saved ?? null;
   const history = loaderData.history;
