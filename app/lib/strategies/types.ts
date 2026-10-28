@@ -291,6 +291,20 @@ export const LOT_SIZES: Record<string, number> = {
 /** Hedged iron-condor SPAN ≈ this fraction of index notional (Dhan Nifty IC ~₹70k). */
 export const IC_SPAN_NOTIONAL_FRAC = 0.044;
 
+/**
+ * Naked 1-leg short SPAN ≈ this fraction of index notional.
+ * Same Dhan builder 28 Oct 2026, Nifty 22800 PE short 1 lot: Overall Margin ₹1,75,539
+ * on spot 22,698.85 → ~11.9% of notional.
+ */
+export const NAKED_SPAN_NOTIONAL_FRAC = 0.119;
+
+/**
+ * 2-leg credit SPAN ≈ this fraction of index notional.
+ * Dhan Nifty sell 22800 PE / buy 22500 PE, 1 lot: Final Margin ₹55,412
+ * (~3.76% of notional after ₹1,20,127 hedge benefit).
+ */
+export const SPREAD_SPAN_NOTIONAL_FRAC = 0.0376;
+
 export function lotSizeFor(instrumentId: string) {
   return LOT_SIZES[instrumentId] ?? 1;
 }

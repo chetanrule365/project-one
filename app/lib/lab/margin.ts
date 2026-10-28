@@ -1,6 +1,17 @@
-import { IC_SPAN_NOTIONAL_FRAC, lotSizeFor } from "../strategies/types";
+import {
+  IC_SPAN_NOTIONAL_FRAC,
+  NAKED_SPAN_NOTIONAL_FRAC,
+  SPREAD_SPAN_NOTIONAL_FRAC,
+  lotSizeFor,
+} from "../strategies/types";
 
-/** 1-lot capital blocked in ₹ (Dhan-style). */
+function spanFrac(legs: number) {
+  if (legs >= 4) return IC_SPAN_NOTIONAL_FRAC;
+  if (legs <= 1) return NAKED_SPAN_NOTIONAL_FRAC;
+  return SPREAD_SPAN_NOTIONAL_FRAC;
+}
+
+/** 1-lot capital blocked in ₹ (Dhan Final / Overall Margin). */
 export function marginRequiredInr(input: {
   instrumentId?: string | null;
   strategyId?: string | null;
@@ -13,10 +24,12 @@ export function marginRequiredInr(input: {
   if (input.credit < 0) return Math.abs(input.credit) * lot;
 
   const legs = inferLegCount(input);
-  if (legs >= 4 && input.spot && input.spot > 0) {
-    return input.spot * lot * IC_SPAN_NOTIONAL_FRAC;
+  const maxLoss = Math.max(0, input.width - input.credit) * lot;
+  const spot = input.spot;
+  if (spot && spot > 0) {
+    return Math.max(maxLoss, spot * lot * spanFrac(legs));
   }
-  return Math.max(0, input.width - input.credit) * lot;
+  return maxLoss;
 }
 
 export function inferLegCount(input: {

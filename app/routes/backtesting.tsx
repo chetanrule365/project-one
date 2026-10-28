@@ -224,7 +224,7 @@ function BacktestResults({ result }: { result: SavedBacktest }) {
         {result.mode === "auto" ? "Auto path" : "Single path"}
         {` · saved ${formatIstStamp(result.savedAt)} IST`}
         {` · Dhan ₹${DHAN_FNO_BROKERAGE_PER_ORDER}/order (buy+sell each leg; GST/STT not included)`}
-        {` · margin 1 lot (SPAN on 4-leg, max loss on 2-leg)`}
+        {` · margin 1 lot (Dhan Overall on 1-leg, Final on 2-leg, SPAN on 4-leg)`}
       </p>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard label="Trades" value={String(m.trades)} />

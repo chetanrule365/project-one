@@ -4,8 +4,10 @@ import { inferLegCount, marginRequiredInr } from "./margin";
 
 /**
  * Capital blocked in ₹ for 1 lot.
- * Buys: premium paid. 4-leg IC: Dhan SPAN (~4.4% of notional).
- * 2-leg credits: defined-risk max loss (width − credit).
+ * Buys: premium paid.
+ * 1-leg short: Dhan Overall Margin (~11.9% of notional).
+ * 2-leg credit: Dhan Final Margin (~3.76% of notional).
+ * 4-leg IC: Dhan SPAN (~4.4% of notional).
  */
 export function marginConsumedInr(trade: {
   instrument_id?: string;

@@ -8,6 +8,7 @@ import {
   type BacktestResult,
 } from "./backtest-shared";
 import type { PaperRun, PaperTrade } from "./paper-store.server";
+import { marginRequiredInr } from "./margin";
 
 const NOW = "2026-10-22T07:42:00.000Z";
 
@@ -187,14 +188,20 @@ const openSensex: PaperTrade = {
 
 function withInstrument(trade: PaperTrade) {
   const instrument_id = trade.run_id === 1 ? "NIFTY" : "SENSEX";
-  const lot = instrument_id === "NIFTY" ? 65 : 20;
   const brokerage_inr = trade.brokerage_inr ?? 80;
   const pnl_after =
     trade.pnl_inr == null ? null : trade.pnl_inr - brokerage_inr;
   return {
     ...trade,
     instrument_id,
-    margin_inr: trade.width * lot * 0.4,
+    margin_inr: marginRequiredInr({
+      instrumentId: instrument_id,
+      strategyId: trade.strategy_id,
+      credit: trade.credit,
+      width: trade.width,
+      spot: trade.spot_entry,
+      legCount: trade.legs?.length ?? 2,
+    }),
     brokerage_inr,
     pnl_after_brokerage_inr: pnl_after,
   };
@@ -352,7 +359,14 @@ function sampleBacktestTrade(
     legCount: 2,
     brokerageInr: 80,
     pnlAfterBrokerageInr: pnlInr - 80,
-    marginInr: 7500,
+    marginInr: marginRequiredInr({
+      instrumentId: "NIFTY",
+      strategyId: "EXPIRY_TREND_CREDIT",
+      credit,
+      width: 150,
+      spot: 25780,
+      legCount: 2,
+    }),
   };
 }
 
